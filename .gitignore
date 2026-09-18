@@ -1,0 +1,29 @@
+# local-only reference (holds live cookies) and local workspace
+legacy/
+.claude/
+
+# secrets and runtime state
+.env*
+cookies.txt
+*.db
+*.db-*
+config/
+
+# media and partial downloads
+*.mp4
+*.mkv
+*.webm
+*.part
+
+# python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# node
+node_modules/
+frontend/dist/
+
+# os
+.DS_Store
