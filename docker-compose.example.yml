@@ -10,6 +10,7 @@ services:
       - UMASK=002                 # default 022
       - TZ=Asia/Karachi
       # - DATABASE_URL=sqlite+aiosqlite:////config/fetcharr.db   # default shown
+      # - COOKIE_SECURE=false     # set true only behind HTTPS (default false)
       # APP_VERSION is set by the image build; don't override it.
     volumes:
       - /path/to/appdata/fetcharr:/config   # LOCAL disk (SQLite database, backups)

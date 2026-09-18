@@ -1,6 +1,8 @@
 name: docker
 
 # PRs are tested once per update; main runs again after a merge (D1 publishes :edge from it).
+# The image job (build, image checks, publish) is skipped until plan D1 enables publishing;
+# until then the image is built and checked locally (scripts/test-image.sh).
 on:
   pull_request:
     branches: [main]
@@ -51,6 +53,7 @@ jobs:
   image:
     runs-on: ubuntu-24.04
     needs: [backend, frontend]
+    if: vars.DOCKERHUB_PUSH_ENABLED == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4

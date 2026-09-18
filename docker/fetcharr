@@ -1,0 +1,9 @@
+#!/bin/sh
+# `fetcharr <command>` inside the container, e.g. `docker exec -it fetcharr fetcharr reset-password`.
+# docker exec runs as root; drop to the app user so database files keep their owner.
+set -eu
+cd /app
+if [ "$(id -u)" = 0 ]; then
+  exec gosu app python -m app.cli "$@"
+fi
+exec python -m app.cli "$@"

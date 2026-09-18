@@ -1,5 +1,7 @@
 import httpx
 
+from tests.api.conftest import create_api_key, setup_account
+
 INDEX = "<!doctype html><title>fetcharr</title>"
 
 
@@ -26,8 +28,14 @@ async def test_static_asset_is_served(client: httpx.AsyncClient) -> None:
 
 
 async def test_unknown_api_path_returns_json_404(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+    api_key = await create_api_key(client)
+    client.cookies.clear()
+
     for method in ("GET", "POST"):
-        response = await client.request(method, "/api/does-not-exist")
+        response = await client.request(
+            method, "/api/does-not-exist", headers={"X-Api-Key": api_key}
+        )
 
         assert response.status_code == 404
         assert response.headers["content-type"] == "application/json"

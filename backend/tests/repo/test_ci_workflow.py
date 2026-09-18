@@ -58,6 +58,15 @@ def test_dockerhub_steps_gated_by_repo_variable(workflow: dict[Any, Any]) -> Non
     assert all(GATE in step.get("if", "") for step in publishing)
 
 
+def test_image_job_runs_only_when_publishing(workflow: dict[Any, Any]) -> None:
+    # Until D1 enables publishing, CI skips the image job on PRs and main alike.
+    condition = workflow["jobs"]["image"]["if"]
+
+    assert condition == GATE
+    assert "if" not in workflow["jobs"]["backend"]
+    assert "if" not in workflow["jobs"]["frontend"]
+
+
 # First major of each action that runs on Node 24 (Node 20 actions are deprecated on runners).
 NODE24_MIN_MAJOR = {
     "actions/checkout": 5,
