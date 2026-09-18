@@ -1,0 +1,25 @@
+# local-only files: never enter the build context
+legacy/
+.claude/
+.git/
+cookies.txt
+**/cookies.txt
+yt-dlp-env/
+.env*
+
+# dependencies, caches and build output (rebuilt inside the image)
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+frontend/dist/
+
+# runtime data and media
+config/
+*.db
+*.db-*
+*.mp4
+*.mkv
+*.webm
+*.part
