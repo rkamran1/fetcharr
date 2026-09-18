@@ -49,7 +49,8 @@ RUN groupadd --gid 1000 app \
  && mkdir -p /config
 
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod 0755 /entrypoint.sh
+COPY docker/fetcharr /usr/local/bin/fetcharr
+RUN chmod 0755 /entrypoint.sh /usr/local/bin/fetcharr
 
 ENV PATH="/app/.venv/bin:/opt/yt-dlp/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \

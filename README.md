@@ -2,7 +2,7 @@
 
 A self-hosted web UI for `yt-dlp` that downloads into Sonarr/Radarr's folder layout and asks them to import the result.
 
-Status: early development. This version is the skeleton: a page that shows the app version, `/healthz`, the database foundation and the Docker image.
+Status: early development. This version has the skeleton (`/healthz`, the database foundation, the Docker image) and login for a single account.
 
 ## Run it
 
@@ -14,6 +14,16 @@ docker compose pull fetcharr && docker compose up -d fetcharr
 
 On start the container backs up an existing database to `/config/backups/` (keeping the newest 5), applies migrations, and serves the UI on port 8000 inside the container.
 
+On the first visit, fetcharr asks you to create its one account. Settings has "Change password" and an API key (sent as the `X-Api-Key` header).
+
+### Password reset
+
+If you forget the password, reset it inside the container. This signs out every session:
+
+```bash
+docker exec -it fetcharr fetcharr reset-password
+```
+
 ## Configuration
 
 | Variable | Default | Used by | Meaning |
@@ -23,6 +33,7 @@ On start the container backs up an existing database to `/config/backups/` (keep
 | `UMASK` | `022` | entrypoint | umask for files the app creates (`002` to match a shared arr group). |
 | `TZ` | unset | container | time zone, e.g. `Asia/Karachi`. |
 | `DATABASE_URL` | `sqlite+aiosqlite:////config/fetcharr.db` | app | database location. Keep `/config` on a local disk. |
+| `COOKIE_SECURE` | `false` | app | add `Secure` to the session cookie. Keep `false` for plain HTTP on the LAN, set `true` behind HTTPS. |
 | `APP_VERSION` | `dev` | app | version shown in the UI and `/healthz`. Set by the image build (`--build-arg APP_VERSION=…`). |
 
 ## Development

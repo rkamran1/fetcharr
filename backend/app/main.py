@@ -2,9 +2,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
+from app.api import auth as auth_api
+from app.auth.deps import check_origin, require_auth
+from app.auth.ratelimit import LoginRateLimiter
 from app.config import Settings
 from app.db.session import Database
 
@@ -24,12 +27,22 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
             await app.state.db.dispose()
 
     app = FastAPI(title="fetcharr", version=settings.app_version, lifespan=lifespan)
+    app.state.settings = settings
+    app.state.login_limiter = LoginRateLimiter()
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok", "version": settings.app_version}
 
-    @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    # Every /api route requires a session or the API key, except the public auth routes.
+    app.include_router(auth_api.public, dependencies=[Depends(check_origin)])
+    app.include_router(auth_api.protected, dependencies=[Depends(require_auth)])
+
+    @app.api_route(
+        "/api/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        dependencies=[Depends(require_auth)],
+    )
     async def api_not_found(path: str) -> None:
         raise HTTPException(status_code=404, detail="Not Found")
 

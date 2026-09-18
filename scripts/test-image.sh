@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks a built fetcharr image: bundled tools, /healthz smoke test, PUID/PGID handling,
+# Checks a built fetcharr image: bundled tools, /healthz smoke test, the fetcharr CLI, PUID/PGID handling,
 # pre-migration DB backups and that no local-only file got into the image.
 # Usage: scripts/test-image.sh [image]   (default: fetcharr:dev)
 set -euo pipefail
@@ -52,6 +52,15 @@ wait_healthy "$smoke" "$PORT" || fail "smoke: /healthz not 200 within 60s"
 body="$(curl -fsS "http://localhost:$PORT/healthz")"
 echo "$body" | grep -q '"status":"ok"' || fail "smoke: unexpected body $body"
 pass "smoke: /healthz -> $body"
+
+# --- cli: `fetcharr` is on PATH and reaches the DB as the app user ------------------
+set +e
+cli_out="$(docker exec "$smoke" fetcharr reset-password </dev/null 2>&1)"
+cli_code=$?
+set -e
+[ "$cli_code" = "1" ] || fail "cli: expected exit 1 on a fresh DB, got $cli_code: $cli_out"
+echo "$cli_out" | grep -q "No account yet" || fail "cli: unexpected output: $cli_out"
+pass "cli: fetcharr reset-password reports no account on a fresh DB"
 docker rm -f "$smoke" >/dev/null
 
 # --- puid: PUID/PGID own /config/fetcharr.db and run uvicorn --------------------------
