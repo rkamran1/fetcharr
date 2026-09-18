@@ -1,0 +1,47 @@
+[project]
+name = "fetcharr"
+version = "0.0.0"
+description = "Self-hosted yt-dlp web UI that organises downloads for Radarr/Sonarr"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "alembic>=1.20.0",
+    "fastapi>=0.141.1",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.0.54",
+    "tenacity>=9.1.4",
+    "uvicorn[standard]>=0.53.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pyyaml>=6.0.3",
+    "respx>=0.23.1",
+    "ruff>=0.16.8",
+    "ty>=0.0.82",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ASYNC"]
+
+[tool.ty.environment]
+python-version = "3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_debug = true
+addopts = "-m 'not network'"
+markers = ["network: tests that reach the real internet (excluded by default)"]

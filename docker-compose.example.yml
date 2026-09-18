@@ -1,0 +1,19 @@
+# Paste this service into the docker-compose.yml that already runs Sonarr/Radarr.
+# Being in the same compose project puts it on the same network and lets it share /data.
+services:
+  fetcharr:
+    image: docker.io/<your-dockerhub-user>/fetcharr:latest   # or pin :1.4 for controlled updates
+    container_name: fetcharr
+    environment:
+      - PUID=1000                 # same values as your sonarr/radarr services (default 1000)
+      - PGID=1000                 # default 1000
+      - UMASK=002                 # default 022
+      - TZ=Asia/Karachi
+      # - DATABASE_URL=sqlite+aiosqlite:////config/fetcharr.db   # default shown
+      # APP_VERSION is set by the image build; don't override it.
+    volumes:
+      - /path/to/appdata/fetcharr:/config   # LOCAL disk (SQLite database, backups)
+      - /path/to/data:/data                 # the SAME host path your sonarr/radarr/qbit use
+    ports:
+      - "8686:8000"
+    restart: unless-stopped

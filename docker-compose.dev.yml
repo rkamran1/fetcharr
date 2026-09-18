@@ -1,0 +1,32 @@
+# Local development on the Mac: backend with uvicorn --reload, frontend with the Vite dev server.
+# Open http://localhost:8686. Usage: docker compose -f docker-compose.dev.yml up --build
+services:
+  backend:
+    build: .
+    image: fetcharr:dev
+    environment:
+      - PUID=1000
+      - PGID=1000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+    volumes:
+      - ./backend/app:/app/app
+      - fetcharr-dev-config:/config
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /web
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      - VITE_PROXY_TARGET=http://backend:8000
+    volumes:
+      - ./frontend:/web
+      - /web/node_modules
+    ports:
+      - "8686:5173"
+    depends_on:
+      - backend
+
+volumes:
+  fetcharr-dev-config:
