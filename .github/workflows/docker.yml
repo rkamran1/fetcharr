@@ -23,6 +23,8 @@ jobs:
         run: uv run --directory backend ruff format --check .
       - name: Types
         run: uv run --directory backend ty check app
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Tests
         run: uv run --directory backend pytest -q
       - name: Migrations

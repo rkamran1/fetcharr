@@ -91,3 +91,12 @@ def test_actions_run_on_node24_and_runner_is_pinned(workflow: dict[Any, Any]) ->
             outdated.append(ref)
     assert outdated == []
     assert {job["runs-on"] for job in jobs} == {"ubuntu-24.04"}
+
+
+def test_backend_job_installs_ffmpeg(workflow: dict[Any, Any]) -> None:
+    steps = workflow["jobs"]["backend"]["steps"]
+    runs = [step.get("run", "") for step in steps]
+    install = next(i for i, run in enumerate(runs) if "apt-get install" in run and "ffmpeg" in run)
+    tests = next(i for i, run in enumerate(runs) if "pytest" in run)
+
+    assert install < tests

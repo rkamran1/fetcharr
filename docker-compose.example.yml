@@ -1,5 +1,5 @@
 # Paste this service into the docker-compose.yml that already runs Sonarr/Radarr.
-# Being in the same compose project puts it on the same network and lets it share /data.
+# Being in the same compose project puts it on the same network as Radarr/Sonarr.
 services:
   fetcharr:
     image: docker.io/<your-dockerhub-user>/fetcharr:latest   # or pin :1.4 for controlled updates
@@ -11,10 +11,16 @@ services:
       - TZ=Asia/Karachi
       # - DATABASE_URL=sqlite+aiosqlite:////config/fetcharr.db   # default shown
       # - COOKIE_SECURE=false     # set true only behind HTTPS (default false)
+      # - COMPLETED_DIR=/web-downloads/completed    # default shown
+      # - INCOMPLETE_DIR=/web-downloads/incomplete  # default shown
       # APP_VERSION is set by the image build; don't override it.
     volumes:
       - /path/to/appdata/fetcharr:/config   # LOCAL disk (SQLite database, backups)
-      - /path/to/data:/data                 # the SAME host path your sonarr/radarr/qbit use
+      - /path/to/web-downloads:/web-downloads   # holds completed/ and incomplete/
+    # Radarr and Sonarr must mount the SAME host folder at /web-downloads too, e.g.
+    #   radarr: volumes: [ /path/to/web-downloads:/web-downloads ]
+    #   sonarr: volumes: [ /path/to/web-downloads:/web-downloads ]
+    # so the paths fetcharr hands them exist inside their containers.
     ports:
       - "8686:8000"
     restart: unless-stopped
