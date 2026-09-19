@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import yaml
+
 # The /dev-workflow-loop verification table; CLAUDE.md must list every one of these.
 VERIFICATION_COMMANDS = [
     "uv run --directory backend ruff check .",
@@ -93,3 +95,25 @@ def test_nothing_from_legacy_tracked(repo_root: Path) -> None:
         check=False,
     )
     assert ignored.stdout.splitlines() == probes
+
+
+def test_path_settings_documented(repo_root: Path) -> None:
+    compose = (repo_root / "docker-compose.example.yml").read_text()
+    readme_rows = [
+        line for line in (repo_root / "README.md").read_text().splitlines() if line.startswith("|")
+    ]
+
+    for name, default in (
+        ("COMPLETED_DIR", "/web-downloads/completed"),
+        ("INCOMPLETE_DIR", "/web-downloads/incomplete"),
+    ):
+        assert f"{name}={default}" in compose
+        assert any(row.startswith(f"| `{name}` | `{default}` |") for row in readme_rows)
+
+
+def test_compose_mounts_web_downloads_volume(repo_root: Path) -> None:
+    compose = yaml.safe_load((repo_root / "docker-compose.example.yml").read_text())
+    targets = [volume.split(":")[1] for volume in compose["services"]["fetcharr"]["volumes"]]
+
+    # completed/ and incomplete/ share the /web-downloads volume; no /data mount any more.
+    assert targets == ["/config", "/web-downloads"]

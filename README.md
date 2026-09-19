@@ -26,6 +26,8 @@ docker exec -it fetcharr fetcharr reset-password
 
 ## Configuration
 
+Mount two volumes: `/config` (database and backups, on a local disk) and `/web-downloads`, which holds `completed/` and `incomplete/`. Mount the same host downloads folder at `/web-downloads` in Radarr and Sonarr as well: fetcharr tells them to import from paths under `/web-downloads`, so those paths must exist inside their containers too. Keeping both folders on one volume makes the move from `incomplete/` to `completed/` an instant rename.
+
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
 | `PUID` | `1000` | entrypoint | uid the app runs as. Use the same as your Sonarr/Radarr. |
@@ -34,6 +36,8 @@ docker exec -it fetcharr fetcharr reset-password
 | `TZ` | unset | container | time zone, e.g. `Asia/Karachi`. |
 | `DATABASE_URL` | `sqlite+aiosqlite:////config/fetcharr.db` | app | database location. Keep `/config` on a local disk. |
 | `COOKIE_SECURE` | `false` | app | add `Secure` to the session cookie. Keep `false` for plain HTTP on the LAN, set `true` behind HTTPS. |
+| `COMPLETED_DIR` | `/web-downloads/completed` | app | finished downloads, in `movies/`, `tv-shows/` and `other/`, waiting for Radarr/Sonarr to import them. |
+| `INCOMPLETE_DIR` | `/web-downloads/incomplete` | app | per-job work folders; replaced files go to `_replaced/`. Keep it on the same volume as `COMPLETED_DIR`. |
 | `APP_VERSION` | `dev` | app | version shown in the UI and `/healthz`. Set by the image build (`--build-arg APP_VERSION=…`). |
 
 ## Development

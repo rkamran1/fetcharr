@@ -51,4 +51,4 @@ Run from the repo root.
 - **Endpoints:** every non-public endpoint requires a session. Each endpoint has a test, including the unauthenticated `401` case.
 - **Migrations:** each model change gets an Alembic revision (`backend/app/db/migrations/versions/`). Applied revisions are never edited.
 - **Config:** each env var is in `backend/app/config.py`, `docker-compose.example.yml` and the README env table.
-- **Tests never touch the internet**, real `/data` or real Radarr/Sonarr. Use `respx`, a local HTTP server and `tmp_path`. Real-site tests are marked `@pytest.mark.network` and excluded by default.
+- **Tests never touch the internet**, real `/web-downloads` or real Radarr/Sonarr. Use `respx`, a local HTTP server and `tmp_path`. Real-site tests are marked `@pytest.mark.network` and excluded by default.
