@@ -1,0 +1,196 @@
+from datetime import timedelta
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from sqlalchemy import select, update
+
+from app.db.models import Inspection, utcnow
+from app.ytdlp import inspect
+from app.ytdlp.inspect import PLAYLIST_MESSAGE, build_inspect_argv
+from app.ytdlp.runtime import detect_js_runtime
+from tests.api.conftest import setup_account
+from tests.fake_ytdlp import FakeYtdlp
+
+YOUTUBE_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+DAILYMOTION_URL = "https://www.dailymotion.com/video/x3z49k"
+
+
+async def _rows(app: FastAPI) -> list[Inspection]:
+    async with app.state.db.read_session() as session:
+        return list(await session.scalars(select(Inspection).order_by(Inspection.id)))
+
+
+async def test_inspect_requires_session(client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp) -> None:
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 401
+    assert fake_ytdlp.calls == []
+
+
+async def test_inspect_youtube_returns_normalised_info(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "inspection_id",
+        "title",
+        "uploader",
+        "thumbnail",
+        "duration",
+        "webpage_url",
+        "extractor",
+        "id",
+        "upload_date",
+        "release_year",
+        "video_heights",
+        "video_codecs",
+        "audio_tracks",
+        "has_hdr",
+        "subtitles",
+        "automatic_captions",
+        "estimated_sizes",
+        "stream_type",
+        "auto",
+    }
+    assert body["title"] == "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film"
+    assert body["video_heights"] == [2160, 1440, 1080, 720, 480, 360, 240, 144]
+    assert body["video_heights"] == sorted(set(body["video_heights"]), reverse=True)
+    assert body["stream_type"] == "dash"
+    assert body["estimated_sizes"]["2160"] == 1362269481 + 10271496
+    rows = await _rows(app)
+    assert [(r.id, r.url, r.site_key) for r in rows] == [(body["inspection_id"], YOUTUBE_URL, None)]
+    assert rows[0].expires_at - rows[0].created_at == timedelta(minutes=30)
+    assert rows[0].info["title"] == body["title"]
+
+
+async def test_inspect_runs_ytdlp_with_inspect_argv(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    url = f"{YOUTUBE_URL}&list=PL123"
+
+    response = await client.post("/api/inspect", json={"url": url})
+
+    assert response.status_code == 200
+    assert fake_ytdlp.calls == [build_inspect_argv(url, detect_js_runtime())]
+    assert "--no-playlist" in fake_ytdlp.calls[0]
+
+
+async def test_inspect_rejects_playlist(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    fake_ytdlp.returns_json("playlist.json")
+
+    response = await client.post(
+        "/api/inspect", json={"url": "https://www.youtube.com/playlist?list=PL123"}
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": PLAYLIST_MESSAGE, "needs_cookies": False}
+    assert await _rows(app) == []
+
+
+async def test_inspect_needs_cookies(client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp) -> None:
+    await setup_account(client)
+    fake_ytdlp.fails_with("age.txt")
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["needs_cookies"] is True
+    assert body["detail"].startswith("Sign in to confirm your age")
+
+
+async def test_inspect_unsupported_url(client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp) -> None:
+    await setup_account(client)
+    fake_ytdlp.fails_with("unsupported.txt")
+
+    response = await client.post("/api/inspect", json={"url": "https://example.com/"})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Unsupported URL", "needs_cookies": False}
+
+
+async def test_inspect_timeout_returns_504(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await setup_account(client)
+    monkeypatch.setattr(inspect, "INSPECT_TIMEOUT_S", 1.0)
+    fake_ytdlp.hangs()
+
+    response = await client.post("/api/inspect", json={"url": DAILYMOTION_URL})
+
+    assert response.status_code == 504
+    assert response.json()["needs_cookies"] is False
+
+
+async def test_inspect_other_failure_returns_502(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    fake_ytdlp.fails_with("network.txt")
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 502
+    assert response.json()["detail"].startswith("ERROR: [youtube] aqz-KE-bpKQ: Unable to download")
+
+
+async def test_inspect_reuses_cache_within_30_minutes(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+
+    first = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+    second = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+    assert len(fake_ytdlp.calls) == 1
+
+
+async def test_inspect_runs_again_after_expiry(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    first = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+    async with app.state.db.write_session() as session:
+        await session.execute(update(Inspection).values(expires_at=utcnow() - timedelta(seconds=1)))
+
+    second = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert second.status_code == 200
+    assert len(fake_ytdlp.calls) == 2
+    assert second.json()["inspection_id"] != first.json()["inspection_id"]
+    assert [r.id for r in await _rows(app)] == [second.json()["inspection_id"]]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://example.com/video.mp4",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "-o/tmp/x",
+        "--exec=id",
+        "not a url",
+        "https://",
+    ],
+)
+async def test_inspect_rejects_bad_urls(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp, url: str
+) -> None:
+    await setup_account(client)
+
+    response = await client.post("/api/inspect", json={"url": url})
+
+    assert response.status_code == 422
+    assert fake_ytdlp.calls == []

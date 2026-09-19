@@ -6,6 +6,7 @@ import { ApiError, getAuthState, getMe } from '@/api/client'
 import AppShell from '@/components/AppShell'
 import { authStateQueryKey, meQueryKey } from '@/lib/queryClient'
 import HomePage from '@/pages/HomePage'
+import InspectPage from '@/pages/InspectPage'
 import LoginPage from '@/pages/LoginPage'
 import SettingsPage from '@/pages/SettingsPage'
 import SetupPage from '@/pages/SetupPage'
@@ -50,6 +51,7 @@ export default function App() {
         }
       >
         <Route index element={<HomePage />} />
+        <Route path="inspect" element={<InspectPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

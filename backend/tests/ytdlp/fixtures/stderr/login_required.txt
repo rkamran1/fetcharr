@@ -1,0 +1,1 @@
+ERROR: [BiliBili] BV1xx411c7mD: This video is for premium members only; login required. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies

@@ -5,7 +5,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-pytest_plugins = ["pytester", "tests.loop_guard"]
+pytest_plugins = ["pytester", "tests.loop_guard", "tests.fake_ytdlp"]
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
