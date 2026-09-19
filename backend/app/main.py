@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 from app.api import auth as auth_api
+from app.api import inspect as inspect_api
 from app.auth.deps import check_origin, require_auth
 from app.auth.ratelimit import LoginRateLimiter
 from app.config import Settings
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     # Every /api route requires a session or the API key, except the public auth routes.
     app.include_router(auth_api.public, dependencies=[Depends(check_origin)])
     app.include_router(auth_api.protected, dependencies=[Depends(require_auth)])
+    app.include_router(inspect_api.router, dependencies=[Depends(require_auth)])
 
     @app.api_route(
         "/api/{path:path}",

@@ -1,0 +1,59 @@
+{
+ "_type": "video",
+ "id": "x3z49k",
+ "title": "Squash (Rémi Gaillard)",
+ "uploader": "Rémi Gaillard",
+ "thumbnail": "https://s2.dmcdn.net/v/PUDO1g3W5LeBi7RP/x1080",
+ "duration": 106,
+ "webpage_url": "https://www.dailymotion.com/video/x3z49k",
+ "extractor": "dailymotion",
+ "extractor_key": "Dailymotion",
+ "upload_date": "20080106",
+ "release_year": null,
+ "protocol": "m3u8_native",
+ "ext": "mp4",
+ "format_id": "hls-720",
+ "vcodec": "avc1.64001f",
+ "acodec": "mp4a.40.2",
+ "height": 576,
+ "dynamic_range": "SDR",
+ "subtitles": {},
+ "formats": [
+  {
+   "format_id": "hls-380",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "avc1.640015",
+   "acodec": "mp4a.40.2",
+   "height": 384,
+   "width": 480,
+   "abr": null,
+   "tbr": 460.56,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "hls-480",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "avc1.64001f",
+   "acodec": "mp4a.40.2",
+   "height": 480,
+   "width": 600,
+   "abr": null,
+   "tbr": 836.28,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "hls-720",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "avc1.64001f",
+   "acodec": "mp4a.40.2",
+   "height": 576,
+   "width": 720,
+   "abr": null,
+   "tbr": 2149.28,
+   "dynamic_range": "SDR"
+  }
+ ]
+}

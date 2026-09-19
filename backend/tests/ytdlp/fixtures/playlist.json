@@ -1,0 +1,27 @@
+{
+ "_type": "playlist",
+ "id": "PLbpi6ZahtOH6Blw3RGYpWkSByi_T7Rygb",
+ "title": "Top Trending Videos of the Week",
+ "uploader": "by YouTube",
+ "channel": "by YouTube",
+ "webpage_url": "https://www.youtube.com/playlist?list=PLbpi6ZahtOH6Blw3RGYpWkSByi_T7Rygb",
+ "extractor": "youtube:tab",
+ "extractor_key": "YoutubeTab",
+ "release_year": null,
+ "entries": [
+  {
+   "_type": "url",
+   "ie_key": "Youtube",
+   "id": "Vh4O04Bpovw",
+   "url": "https://www.youtube.com/watch?v=Vh4O04Bpovw",
+   "title": "I Explored A $200,000,000 Forgotten Space Colony"
+  },
+  {
+   "_type": "url",
+   "ie_key": "Youtube",
+   "id": "5TIp7oVKHq8",
+   "url": "https://www.youtube.com/watch?v=5TIp7oVKHq8",
+   "title": "I spent a day with REALITY TV STARS"
+  }
+ ]
+}

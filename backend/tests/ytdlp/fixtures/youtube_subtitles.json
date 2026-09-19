@@ -1,0 +1,478 @@
+{
+ "_type": "video",
+ "id": "jNQXAC9IVRw",
+ "title": "Me at the zoo",
+ "uploader": "jawed",
+ "channel": "jawed",
+ "thumbnail": "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=-oaymwEmCOADEOgC8quKqQMa8AEB-AG-AoAC8AGKAgwIABABGFUgWShlMA8=&rs=AOn4CLA9eLBatYv9WbkD4BbZ2Im-biSPTw",
+ "duration": 19,
+ "webpage_url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+ "extractor": "youtube",
+ "extractor_key": "Youtube",
+ "upload_date": "20050424",
+ "release_year": null,
+ "protocol": "https+https",
+ "ext": "webm",
+ "format_id": "395+251",
+ "vcodec": "av01.0.00M.08.0.110.05.01.06.0",
+ "acodec": "opus",
+ "height": 240,
+ "dynamic_range": "SDR",
+ "filesize_approx": 475961,
+ "subtitles": {
+  "en": [
+   {
+    "ext": "json3",
+    "name": "English"
+   },
+   {
+    "ext": "srv1",
+    "name": "English"
+   },
+   {
+    "ext": "srv2",
+    "name": "English"
+   },
+   {
+    "ext": "srv3",
+    "name": "English"
+   },
+   {
+    "ext": "ttml",
+    "name": "English"
+   },
+   {
+    "ext": "srt",
+    "name": "English"
+   },
+   {
+    "ext": "vtt",
+    "name": "English"
+   }
+  ],
+  "de": [
+   {
+    "ext": "json3",
+    "name": "German"
+   },
+   {
+    "ext": "srv1",
+    "name": "German"
+   },
+   {
+    "ext": "srv2",
+    "name": "German"
+   },
+   {
+    "ext": "srv3",
+    "name": "German"
+   },
+   {
+    "ext": "ttml",
+    "name": "German"
+   },
+   {
+    "ext": "srt",
+    "name": "German"
+   },
+   {
+    "ext": "vtt",
+    "name": "German"
+   }
+  ]
+ },
+ "automatic_captions": {
+  "en": [
+   {
+    "ext": "vtt"
+   }
+  ],
+  "de": [
+   {
+    "ext": "vtt"
+   }
+  ]
+ },
+ "formats": [
+  {
+   "format_id": "233",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "none",
+   "abr": null,
+   "tbr": null,
+   "language": null
+  },
+  {
+   "format_id": "234",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "none",
+   "abr": null,
+   "tbr": null,
+   "language": null
+  },
+  {
+   "format_id": "139-drc",
+   "ext": "m4a",
+   "protocol": "https",
+   "container": "m4a_dash",
+   "vcodec": "none",
+   "acodec": "mp4a.40.5",
+   "height": null,
+   "width": null,
+   "abr": 49.127,
+   "tbr": 49.127,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 117495,
+   "filesize_approx": 117493
+  },
+  {
+   "format_id": "249-drc",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 50.012,
+   "tbr": 50.012,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 118912,
+   "filesize_approx": 118909
+  },
+  {
+   "format_id": "250-drc",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 63.755,
+   "tbr": 63.755,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 151586,
+   "filesize_approx": 151585
+  },
+  {
+   "format_id": "139",
+   "ext": "m4a",
+   "protocol": "https",
+   "container": "m4a_dash",
+   "vcodec": "none",
+   "acodec": "mp4a.40.5",
+   "height": null,
+   "width": null,
+   "abr": 49.14,
+   "tbr": 49.14,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 117526,
+   "filesize_approx": 117524
+  },
+  {
+   "format_id": "249",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 47.356,
+   "tbr": 47.356,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 112596,
+   "filesize_approx": 112594
+  },
+  {
+   "format_id": "250",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 60.478,
+   "tbr": 60.478,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 143795,
+   "filesize_approx": 143794
+  },
+  {
+   "format_id": "140-drc",
+   "ext": "m4a",
+   "protocol": "https",
+   "container": "m4a_dash",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "height": null,
+   "width": null,
+   "abr": 129.757,
+   "tbr": 129.757,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 309197,
+   "filesize_approx": 309194
+  },
+  {
+   "format_id": "251-drc",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 107.429,
+   "tbr": 107.429,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 255427,
+   "filesize_approx": 255425
+  },
+  {
+   "format_id": "140",
+   "ext": "m4a",
+   "protocol": "https",
+   "container": "m4a_dash",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "height": null,
+   "width": null,
+   "abr": 129.796,
+   "tbr": 129.796,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 309288,
+   "filesize_approx": 309287
+  },
+  {
+   "format_id": "251",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 106.064,
+   "tbr": 106.064,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 252182,
+   "filesize_approx": 252180
+  },
+  {
+   "format_id": "269",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "avc1.4D400B",
+   "acodec": "none",
+   "height": 144,
+   "width": 192,
+   "abr": 0,
+   "tbr": 139.566,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "160",
+   "ext": "mp4",
+   "protocol": "https",
+   "container": "mp4_dash",
+   "vcodec": "avc1.4d400b",
+   "acodec": "none",
+   "height": 144,
+   "width": 192,
+   "abr": 0,
+   "tbr": 82.513,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 195278,
+   "filesize_approx": 195277
+  },
+  {
+   "format_id": "602",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "vp09.00.10.08",
+   "acodec": "none",
+   "height": 144,
+   "width": 192,
+   "abr": 0,
+   "tbr": 75.112,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "603",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "vp09.00.11.08.01.05.01.06.00",
+   "acodec": "none",
+   "height": 144,
+   "width": 192,
+   "abr": 0,
+   "tbr": 137.995,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "278",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "vp9",
+   "acodec": "none",
+   "height": 144,
+   "width": 192,
+   "abr": 0,
+   "tbr": 78.293,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 185292,
+   "filesize_approx": 185290
+  },
+  {
+   "format_id": "229",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "avc1.4D400C",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 245.113,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "230",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "avc1.4D400C",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 294.965,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "134",
+   "ext": "mp4",
+   "protocol": "https",
+   "container": "mp4_dash",
+   "vcodec": "avc1.4d400c",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 136.218,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 322379,
+   "filesize_approx": 322376
+  },
+  {
+   "format_id": "133",
+   "ext": "mp4",
+   "protocol": "https",
+   "container": "mp4_dash",
+   "vcodec": "avc1.4d400c",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 182.995,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 433081,
+   "filesize_approx": 433080
+  },
+  {
+   "format_id": "604",
+   "ext": "mp4",
+   "protocol": "m3u8_native",
+   "vcodec": "vp09.00.20.08.01.05.01.06.00",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 198.586,
+   "dynamic_range": "SDR"
+  },
+  {
+   "format_id": "242",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "vp9",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 123.838,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 293080,
+   "filesize_approx": 293078
+  },
+  {
+   "format_id": "395",
+   "ext": "mp4",
+   "protocol": "https",
+   "container": "mp4_dash",
+   "vcodec": "av01.0.00M.08.0.110.05.01.06.0",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 94.556,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 223779,
+   "filesize_approx": 223778
+  }
+ ],
+ "requested_formats": [
+  {
+   "format_id": "395",
+   "ext": "mp4",
+   "protocol": "https",
+   "container": "mp4_dash",
+   "vcodec": "av01.0.00M.08.0.110.05.01.06.0",
+   "acodec": "none",
+   "height": 240,
+   "width": 320,
+   "abr": 0,
+   "tbr": 94.556,
+   "language": null,
+   "dynamic_range": "SDR",
+   "filesize": 223779,
+   "filesize_approx": 223778
+  },
+  {
+   "format_id": "251",
+   "ext": "webm",
+   "protocol": "https",
+   "container": "webm_dash",
+   "vcodec": "none",
+   "acodec": "opus",
+   "height": null,
+   "width": null,
+   "abr": 106.064,
+   "tbr": 106.064,
+   "language": null,
+   "dynamic_range": null,
+   "filesize": 252182,
+   "filesize_approx": 252180
+  }
+ ]
+}
