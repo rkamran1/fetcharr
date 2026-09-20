@@ -1,6 +1,6 @@
 """The job API shapes (requirements §11)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -9,6 +9,9 @@ from pydantic import BaseModel
 class JobRead(BaseModel):
     id: str
     request_id: str
+    #: The request this job belongs to, so the queue can group and name it (§12).
+    media_type: str
+    request_title: str | None
     url: str
     source_title: str | None
     thumbnail_url: str | None
@@ -23,6 +26,11 @@ class JobRead(BaseModel):
     eta_s: int | None
     completed_path: str | None
     file_size: int | None
+    # Which episode this is (tv only, §10).
+    season: int | None
+    episode: int | None
+    episode_title: str | None
+    air_date: date | None
     import_status: str
     import_attempts: int
     import_detail: dict[str, Any] | None

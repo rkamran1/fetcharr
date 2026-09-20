@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { formatBytes } from '@/lib/format'
@@ -24,6 +26,9 @@ export default function DownloadOptionsFields({
   heights,
   estimatedSizes,
 }: Props) {
+  // Unique per instance: a TV season shows one of these per episode, and duplicate ids
+  // would point every label at the first row's control.
+  const id = useId()
   const set = <K extends keyof DownloadOptions>(key: K, next: DownloadOptions[K]) =>
     onChange({ ...value, [key]: next })
 
@@ -67,9 +72,9 @@ export default function DownloadOptionsFields({
     <>
       <div className="flex flex-col gap-4 sm:flex-row">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="quality">Quality</Label>
+          <Label htmlFor={`${id}-quality`}>Quality</Label>
           <NativeSelect
-            id="quality"
+            id={`${id}-quality`}
             value={value.quality}
             onChange={(e) => set('quality', e.target.value as Quality)}
           >
@@ -82,9 +87,9 @@ export default function DownloadOptionsFields({
           </NativeSelect>
         </div>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="container">Container</Label>
+          <Label htmlFor={`${id}-container`}>Container</Label>
           <NativeSelect
-            id="container"
+            id={`${id}-container`}
             value={value.container}
             onChange={(e) => set('container', e.target.value as Container)}
           >
@@ -98,9 +103,9 @@ export default function DownloadOptionsFields({
         <summary className="cursor-pointer">Advanced</summary>
         <div className="flex flex-col gap-4 pt-4 sm:flex-row">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="fragments">Fragments</Label>
+            <Label htmlFor={`${id}-fragments`}>Fragments</Label>
             <NativeSelect
-              id="fragments"
+              id={`${id}-fragments`}
               value={fragments}
               onChange={(e) =>
                 set('fragments', e.target.value === 'auto' ? 'auto' : Number(e.target.value))
@@ -114,9 +119,9 @@ export default function DownloadOptionsFields({
             </NativeSelect>
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="aria2c">aria2c</Label>
+            <Label htmlFor={`${id}-aria2c`}>aria2c</Label>
             <NativeSelect
-              id="aria2c"
+              id={`${id}-aria2c`}
               value={aria2c}
               onChange={(e) =>
                 set('use_aria2c', e.target.value === 'auto' ? 'auto' : e.target.value === 'on')
@@ -130,9 +135,9 @@ export default function DownloadOptionsFields({
             </NativeSelect>
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="retries">Retries</Label>
+            <Label htmlFor={`${id}-retries`}>Retries</Label>
             <Input
-              id="retries"
+              id={`${id}-retries`}
               type="number"
               min={0}
               max={20}

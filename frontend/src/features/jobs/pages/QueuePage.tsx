@@ -1,8 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { jobsQueryKey, listJobs } from '../api'
-import JobCard from '../components/JobCard'
+import RequestGroup from '../components/RequestGroup'
 import { useJobEvents } from '../events'
+import type { Job } from '../types'
+
+/** The jobs of one request together, newest request first (§12). */
+function byRequest(jobs: Job[]): Job[][] {
+  const groups = new Map<string, Job[]>()
+  for (const job of jobs) {
+    const group = groups.get(job.request_id)
+    if (group) group.push(job)
+    else groups.set(job.request_id, [job])
+  }
+  // Episode order inside a request, which is the order they are claimed in (§6.1).
+  for (const group of groups.values()) {
+    group.sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0) || a.created_at.localeCompare(b.created_at))
+  }
+  return [...groups.values()]
+}
 
 export default function QueuePage() {
   const jobs = useQuery({ queryKey: jobsQueryKey, queryFn: listJobs })
@@ -20,7 +36,10 @@ export default function QueuePage() {
       {jobs.isSuccess && jobs.data.jobs.length === 0 && (
         <p className="text-muted-foreground text-sm">Nothing downloading yet.</p>
       )}
-      {jobs.data?.jobs.map((job) => <JobCard key={job.id} job={job} />)}
+      {jobs.data &&
+        byRequest(jobs.data.jobs).map((group) => (
+          <RequestGroup key={group[0].request_id} jobs={group} />
+        ))}
     </div>
   )
 }

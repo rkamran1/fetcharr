@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { MIN_PASSWORD_LENGTH, passwordProblem } from '@/lib/passwords'
 
-import RadarrSettings from '../components/RadarrSettings'
+import ArrSettings from '../components/ArrSettings'
 
 function ChangePassword() {
   const [current, setCurrent] = useState('')
@@ -154,7 +154,8 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">Settings</h1>
-      <RadarrSettings />
+      <ArrSettings app="radarr" />
+      <ArrSettings app="sonarr" />
       <ChangePassword />
       <ApiKeySection />
     </div>

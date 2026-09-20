@@ -49,6 +49,16 @@ function formatEta(seconds: number): string {
   return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
 }
 
+/** `S01E05 — Pilot`, or a daily episode's air date; empty for anything but TV (§12). */
+function episodeLabel(job: Job): string {
+  if (job.media_type !== 'tv') return ''
+  const number =
+    job.episode != null && job.season != null
+      ? `S${String(job.season).padStart(2, '0')}E${String(job.episode).padStart(2, '0')}`
+      : (job.air_date ?? '')
+  return [number, job.episode_title].filter(Boolean).join(' — ')
+}
+
 export default function JobCard({ job }: { job: Job }) {
   const queryClient = useQueryClient()
   const [logOpen, setLogOpen] = useState(false)
@@ -76,9 +86,15 @@ export default function JobCard({ job }: { job: Job }) {
     <Card>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate font-medium">{job.source_title ?? job.url}</h2>
+          <h2 className="min-w-0 flex-1 truncate font-medium">
+            {episodeLabel(job) || (job.source_title ?? job.url)}
+          </h2>
           <Badge variant="outline">{PHASE_LABEL[job.status]}</Badge>
         </div>
+        {/* A TV card is named by its episode, so the video's own title goes below it. */}
+        {episodeLabel(job) && job.source_title && (
+          <p className="text-muted-foreground -mt-2 truncate text-xs">{job.source_title}</p>
+        )}
         {running && (
           <div
             role="progressbar"

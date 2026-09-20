@@ -2,7 +2,7 @@
 
 The pipeline owns no database code: every write goes through the callbacks in
 ``PipelineContext``, which the JobManager supplies. That is what keeps a write transaction
-from ever spanning the yt-dlp subprocess or a call to Radarr (§3.1 rule 2).
+from ever spanning the yt-dlp subprocess or a call to Radarr/Sonarr (§3.1 rule 2).
 """
 
 import asyncio
@@ -18,16 +18,23 @@ from tenacity import AsyncRetrying, RetryCallState, retry_if_exception_type, sto
 
 from app.db.base import utcnow
 from app.integrations.arr import (
+    EPISODE_SCAN,
+    FINISHED,
+    MOVIE_SCAN,
+    RADARR,
+    SONARR,
     ArrAuthError,
+    ArrClientError,
     ArrConnection,
     ArrError,
     ArrServerError,
     ArrTimeout,
     ImportPolicy,
     RadarrClient,
+    SonarrClient,
 )
 from app.jobs.constants import STEPS, ImportStatus, JobStatus, Step
-from app.library.naming import Movie, Target
+from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
 from app.library.organizer import CollisionPolicy, is_organized, organize, prune_empty_dirs
 from app.library.probe import ProbeError, probe
 from app.ytdlp.command import build_argv
@@ -50,8 +57,11 @@ SetStatus = Callable[[JobStatus, Step], Awaitable[None]]
 IMPORT_DONE = (ImportStatus.IMPORTED, ImportStatus.NOT_IMPORTED)
 #: Retried because they pass: everything else is a verdict, not a hiccup (§6.1).
 IMPORT_RETRYABLE = (httpx.TransportError, ArrServerError, ArrTimeout)
-NOT_CONFIGURED = "Radarr is not configured in Settings"
 BAD_KEY_HINT = "check the API key in Settings"
+
+
+def not_configured(app: str) -> str:
+    return f"{app} is not configured in Settings"
 
 
 @dataclass
@@ -76,11 +86,14 @@ class PipelineContext:
     last_completed_step: Step | None = None
     completed_path: Path | None = None
     collision_policy: CollisionPolicy = CollisionPolicy.KEEP_BOTH
-    #: The import half (§7.5); only a movie target ever uses it.
+    #: The import half (§7.5); an `other` target never uses it.
     import_status: str = ImportStatus.NOT_APPLICABLE
     radarr_movie_id: int | None = None
     radarr: RadarrClient | None = None
     radarr_connection: ArrConnection | None = None
+    sonarr_episode_id: int | None = None
+    sonarr: SonarrClient | None = None
+    sonarr_connection: ArrConnection | None = None
     import_policy: ImportPolicy = field(default_factory=ImportPolicy)
     #: Injectable so tests run the retry policy without sleeping (§6.1).
     download_wait: Any = DOWNLOAD_WAIT
@@ -128,7 +141,7 @@ async def execute(ctx: PipelineContext) -> None:
 
         else:
             # §6.1: skip when the import already has a verdict; `other` has nothing to import.
-            if isinstance(ctx.target, Movie) and ctx.import_status not in IMPORT_DONE:
+            if not isinstance(ctx.target, Other) and ctx.import_status not in IMPORT_DONE:
                 await _import(ctx)
                 continue
 
@@ -223,8 +236,74 @@ async def _organize(ctx: PipelineContext, video_path: Path) -> None:
 # --------------------------------------------------------------------------- import (§7.5)
 
 
+@dataclass(frozen=True)
+class _ImportPlan:
+    """Everything the import step needs, chosen once from the job's media type (§7.5)."""
+
+    app: str
+    client: RadarrClient | SonarrClient
+    connection: ArrConnection
+    #: `DownloadedMoviesScan` or `DownloadedEpisodesScan`.
+    scan: str
+    #: What the command carries: the movie's folder, or the episode's own file.
+    send: Path
+    #: Where the file sits: asked for rejections, and pruned once it is empty.
+    folder: Path
+    #: `completed/movies` or `completed/tv-shows`; pruning stops below it.
+    root: Path
+    #: The arr resource that says where the file went, or None for a manually typed title.
+    lookup: Callable[[], Awaitable[dict[str, Any]]] | None
+    #: The key that holds the library path in that resource.
+    file_key: str
+
+
+def _plan(ctx: PipelineContext, folder: Path) -> _ImportPlan | None:
+    """The plan for this job, or None when its arr app isn't configured (§7.5)."""
+    assert ctx.completed_path is not None  # noqa: S101 - organize always records it
+    match ctx.target:
+        case Movie():
+            if ctx.radarr is None or ctx.radarr_connection is None:
+                return None
+            radarr, to_radarr = ctx.radarr, ctx.radarr_connection
+            movie_id = ctx.radarr_movie_id
+            return _ImportPlan(
+                app=RADARR,
+                client=radarr,
+                connection=to_radarr,
+                scan=MOVIE_SCAN,
+                send=folder,
+                folder=folder,
+                root=ctx.completed_dir / "movies",
+                lookup=(lambda: radarr.movie(to_radarr, movie_id))
+                if movie_id is not None
+                else None,
+                file_key="movieFile",
+            )
+        case Episode() | DailyEpisode():
+            if ctx.sonarr is None or ctx.sonarr_connection is None:
+                return None
+            sonarr, to_sonarr = ctx.sonarr, ctx.sonarr_connection
+            episode_id = ctx.sonarr_episode_id
+            return _ImportPlan(
+                app=SONARR,
+                client=sonarr,
+                connection=to_sonarr,
+                scan=EPISODE_SCAN,
+                # Scoped as narrowly as §7.5 asks: the episode file itself.
+                send=ctx.completed_path,
+                folder=folder,
+                root=ctx.completed_dir / "tv-shows",
+                lookup=(lambda: sonarr.episode(to_sonarr, episode_id))
+                if episode_id is not None
+                else None,
+                file_key="episodeFile",
+            )
+        case _:  # pragma: no cover - `other` never reaches the import step
+            return None
+
+
 async def _import(ctx: PipelineContext) -> None:
-    """Ask Radarr to move the file into its library, then check that it really did."""
+    """Ask arr to move the file into its library, then check that it really did."""
     started = perf_counter()
     await ctx.set_status(JobStatus.IMPORTING, Step.IMPORT)
     if ctx.completed_path is None:  # pragma: no cover - organize always records it
@@ -232,11 +311,13 @@ async def _import(ctx: PipelineContext) -> None:
     folder = ctx.completed_path.parent
     attempts = 0
 
-    if ctx.radarr is None or ctx.radarr_connection is None:
-        ctx.on_log(NOT_CONFIGURED)
-        outcome = ImportOutcome(ImportStatus.NOT_IMPORTED, detail={"rejections": [NOT_CONFIGURED]})
+    plan = _plan(ctx, folder)
+    if plan is None:
+        message = not_configured(SONARR if _is_episode(ctx.target) else RADARR)
+        ctx.on_log(message)
+        outcome = ImportOutcome(ImportStatus.NOT_IMPORTED, detail={"rejections": [message]})
     else:
-        attempts, outcome = await _import_with_retries(ctx, folder)
+        attempts, outcome = await _import_with_retries(ctx, plan)
 
     await ctx.checkpoint(
         Step.IMPORT,
@@ -252,7 +333,13 @@ async def _import(ctx: PipelineContext) -> None:
     )
 
 
-async def _import_with_retries(ctx: PipelineContext, folder: Path) -> tuple[int, ImportOutcome]:
+def _is_episode(target: Target) -> bool:
+    return isinstance(target, Episode | DailyEpisode)
+
+
+async def _import_with_retries(
+    ctx: PipelineContext, plan: _ImportPlan
+) -> tuple[int, ImportOutcome]:
     """§6.1: four attempts over transport errors, 5xx and a polling timeout; nothing else."""
     attempts = 0
     last_command: list[str | None] = [None]
@@ -272,8 +359,8 @@ async def _import_with_retries(ctx: PipelineContext, folder: Path) -> tuple[int,
         ):
             with attempt:
                 attempts = attempt.retry_state.attempt_number
-                ctx.on_log(f"import attempt {attempts}: asking Radarr to import {folder}")
-                return attempts, await _import_once(ctx, folder, last_command)
+                ctx.on_log(f"import attempt {attempts}: asking {plan.app} to import {plan.send}")
+                return attempts, await _import_once(ctx, plan, last_command)
     except ArrAuthError as error:
         ctx.on_log(f"import failed: {error}")
         return attempts, _failed(f"{error}", last_command[0])
@@ -284,64 +371,68 @@ async def _import_with_retries(ctx: PipelineContext, folder: Path) -> tuple[int,
 
 
 async def _import_once(
-    ctx: PipelineContext, folder: Path, last_command: list[str | None]
+    ctx: PipelineContext, plan: _ImportPlan, last_command: list[str | None]
 ) -> ImportOutcome:
-    client, connection = ctx.radarr, ctx.radarr_connection
-    assert client is not None and connection is not None  # noqa: S101 - guarded by the caller
-
     # Verification first: after a crash the command may already have done its work (§6.1).
-    imported = await _verify(ctx, folder)
+    imported = await _verify(ctx, plan)
     if imported is not None:
-        ctx.on_log("Radarr already has this file; nothing to send")
+        ctx.on_log(f"{plan.app} already has this file; nothing to send")
         return ImportOutcome(ImportStatus.IMPORTED, last_command[0], path=imported)
 
     # One import command at a time per arr app (§6.1).
-    async with client.import_lock:
-        command_id = await client.send_command(connection, str(folder))
+    async with plan.client.import_lock:
+        command_id = await _send_command(ctx, plan)
         last_command[0] = command_id
-        ctx.on_log(f"Radarr command {command_id}: {folder}")
-        await _poll(ctx, command_id)
-        imported = await _verify(ctx, folder)
+        ctx.on_log(f"{plan.app} command {command_id}: {plan.send}")
+        await _poll(ctx, plan, command_id)
+        imported = await _verify(ctx, plan)
 
     if imported is not None:
         return ImportOutcome(ImportStatus.IMPORTED, command_id, path=imported)
-    # The file is still there, so Radarr refused it. Its reasons are a verdict, not an error.
-    reasons = await client.rejections(connection, str(folder))
-    ctx.on_log(f"Radarr did not import the file: {'; '.join(reasons) or 'no reason given'}")
+    # The file is still there, so arr refused it. Its reasons are a verdict, not an error.
+    reasons = await plan.client.rejections(plan.connection, str(plan.folder))
+    ctx.on_log(f"{plan.app} did not import the file: {'; '.join(reasons) or 'no reason given'}")
     return ImportOutcome(ImportStatus.NOT_IMPORTED, command_id, detail={"rejections": reasons})
 
 
-async def _poll(ctx: PipelineContext, command_id: str) -> None:
+async def _send_command(ctx: PipelineContext, plan: _ImportPlan) -> str:
+    """Send the narrow path, and fall back to the folder if arr won't take it (§7.5 step 1)."""
+    try:
+        return await plan.client.send_command(plan.connection, plan.scan, str(plan.send))
+    except ArrClientError as error:
+        if plan.send == plan.folder:
+            raise
+        ctx.on_log(f"{plan.app} refused the file path ({error}); sending {plan.folder} instead")
+        return await plan.client.send_command(plan.connection, plan.scan, str(plan.folder))
+
+
+async def _poll(ctx: PipelineContext, plan: _ImportPlan, command_id: str) -> None:
     """Poll until the command finishes, or give up with ArrTimeout (§7.5 step 2)."""
-    client, connection = ctx.radarr, ctx.radarr_connection
-    assert client is not None and connection is not None  # noqa: S101 - guarded by the caller
     loop = asyncio.get_running_loop()
     deadline = loop.time() + ctx.import_policy.command_timeout
     while True:
-        status = (await client.command(connection, command_id)).lower()
-        if status in ("completed", "failed", "aborted"):
+        status = (await plan.client.command(plan.connection, command_id)).lower()
+        if status in FINISHED:
             return
         if loop.time() >= deadline:
-            raise ArrTimeout(f"Radarr command {command_id} was still {status or 'unknown'}")
+            raise ArrTimeout(f"{plan.app} command {command_id} was still {status or 'unknown'}")
         await asyncio.sleep(ctx.import_policy.poll_interval)
 
 
-async def _verify(ctx: PipelineContext, folder: Path) -> str | None:
-    """Imported = the file is gone from completed/ **and** Radarr has it (§7.5 step 3)."""
-    client, connection = ctx.radarr, ctx.radarr_connection
-    assert client is not None and connection is not None  # noqa: S101 - guarded by the caller
+async def _verify(ctx: PipelineContext, plan: _ImportPlan) -> str | None:
+    """Imported = the file is gone from completed/ **and** arr has it (§7.5 step 3)."""
     assert ctx.completed_path is not None  # noqa: S101 - guarded by the caller
     if await asyncio.to_thread(ctx.completed_path.exists):
         return None
 
     library_path = ""
-    if ctx.radarr_movie_id is not None:
-        movie = await client.movie(connection, ctx.radarr_movie_id)
-        library_path = str((movie.get("movieFile") or {}).get("path") or "")
+    if plan.lookup is not None:
+        resource = await plan.lookup()
+        library_path = str((resource.get(plan.file_key) or {}).get("path") or "")
         if not library_path:
             return None
-    # The folder is ours and now empty, so it goes; `movies/` itself always stays (§7.5).
-    await asyncio.to_thread(prune_empty_dirs, folder, ctx.completed_dir / "movies")
+    # The folders are ours and now empty, so they go; the category folder stays (§7.5).
+    await asyncio.to_thread(prune_empty_dirs, plan.folder, plan.root)
     return library_path or None
 
 

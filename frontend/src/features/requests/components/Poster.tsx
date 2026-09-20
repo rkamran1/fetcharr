@@ -1,17 +1,18 @@
 import { cn } from '@/lib/utils'
 
 type Props = {
-  /** Radarr's poster URL, or null when it has no artwork for the movie. */
+  /** Radarr's or Sonarr's poster URL, or null when it has no artwork for this title. */
   url: string | null
   className?: string
 }
 
 /**
- * A movie's poster, always decorative: the title sits beside or below it everywhere this is
- * used, so an alt text would only duplicate it — and would land in the accessible name of the
- * button wrapping it. Radarr's poster is an absolute TMDB URL, so no API key is involved.
+ * A movie's or series' poster, always decorative: the title sits beside or below it
+ * everywhere this is used, so an alt text would only duplicate it — and would land in the
+ * accessible name of the button wrapping it. Both apps hand out an absolute, public artwork
+ * URL (TMDB, TheTVDB), so no API key is involved.
  */
-export default function MoviePoster({ url, className }: Props) {
+export default function Poster({ url, className }: Props) {
   const shape = cn('aspect-[2/3] shrink-0 rounded object-cover', className)
 
   if (!url) {

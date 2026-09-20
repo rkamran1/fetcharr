@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function HomePage() {
   return (
@@ -31,15 +31,19 @@ export default function HomePage() {
             </CardHeader>
           </Card>
         </Link>
-        <Card className="h-full opacity-60">
-          <CardHeader>
-            <CardTitle>
-              <h2 className="text-lg">TV Show</h2>
-            </CardTitle>
-            <CardDescription>Coming with Sonarr import.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-sm">Not available yet.</CardContent>
-        </Card>
+        <Link to="/download/tv" className="rounded-xl focus-visible:ring-2">
+          <Card className="h-full transition-colors hover:border-primary">
+            <CardHeader>
+              <CardTitle>
+                <h2 className="text-lg">TV Show</h2>
+              </CardTitle>
+              <CardDescription>
+                Fill the gaps Sonarr is missing, one episode at a time, then it moves them
+                into your library.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
       </div>
     </div>
   )

@@ -44,6 +44,8 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `SECRET_KEY_FILE` | `/config/secret.key` | app | where that key is read from, and written (mode `0600`) when it doesn't exist yet. Keep `/config` backed up: a lost key means re-entering every stored secret. |
 | `RADARR_URL` | unset | app | Radarr's base URL, e.g. `http://radarr:7878`. Set here it overrides what Settings holds. |
 | `RADARR_API_KEY` | unset | app | Radarr's API key. Set here it overrides what Settings holds and is never written to the database. |
+| `SONARR_URL` | unset | app | Sonarr's base URL, e.g. `http://sonarr:8989`. Set here it overrides what Settings holds. |
+| `SONARR_API_KEY` | unset | app | Sonarr's API key. Set here it overrides what Settings holds and is never written to the database. |
 | `APP_VERSION` | `dev` | app | version shown in the UI and `/healthz`. Set by the image build (`--build-arg APP_VERSION=…`). |
 
 ## Development

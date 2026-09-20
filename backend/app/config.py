@@ -21,3 +21,5 @@ class Settings(BaseSettings):
     # Set here, these win over whatever Settings holds (requirements §7.5).
     radarr_url: str | None = None
     radarr_api_key: str | None = None
+    sonarr_url: str | None = None
+    sonarr_api_key: str | None = None

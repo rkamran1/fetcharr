@@ -8,6 +8,10 @@ class SettingsRead(BaseModel):
     radarr_api_key_set: bool
     #: True when RADARR_URL/RADARR_API_KEY are set, so editing here would change nothing.
     radarr_from_env: bool
+    sonarr_url: str | None
+    sonarr_api_key_set: bool
+    #: The same, for SONARR_URL/SONARR_API_KEY.
+    sonarr_from_env: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -15,3 +19,5 @@ class SettingsUpdate(BaseModel):
 
     radarr_url: str | None = None
     radarr_api_key: str | None = None
+    sonarr_url: str | None = None
+    sonarr_api_key: str | None = None

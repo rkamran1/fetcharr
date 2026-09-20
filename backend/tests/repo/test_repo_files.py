@@ -124,15 +124,22 @@ def test_pipeline_settings_documented(repo_root: Path) -> None:
         assert any(row.startswith(f"| `{name}` | `{default}` |") for row in readme_rows)
 
 
-def test_secret_and_radarr_settings_documented(repo_root: Path) -> None:
+def test_secret_and_arr_settings_documented(repo_root: Path) -> None:
     compose = (repo_root / "docker-compose.example.yml").read_text()
     readme_rows = [
         line for line in (repo_root / "README.md").read_text().splitlines() if line.startswith("|")
     ]
 
-    # SECRET_KEY, RADARR_URL and RADARR_API_KEY have no default worth shipping, so the
+    # SECRET_KEY and the arr URLs and keys have no default worth shipping, so the
     # compose file names them commented out and the README explains what they do (§13.4).
-    for name in ("SECRET_KEY", "SECRET_KEY_FILE", "RADARR_URL", "RADARR_API_KEY"):
+    for name in (
+        "SECRET_KEY",
+        "SECRET_KEY_FILE",
+        "RADARR_URL",
+        "RADARR_API_KEY",
+        "SONARR_URL",
+        "SONARR_API_KEY",
+    ):
         assert f"{name}=" in compose, name
         assert any(row.startswith(f"| `{name}` |") for row in readme_rows), name
     assert "SECRET_KEY_FILE=/config/secret.key" in compose
@@ -176,10 +183,12 @@ def test_dev_compose_runs_the_arr_apps_on_one_shared_path(repo_root: Path) -> No
         "${DEV_SONARR_API_KEY:-"
     )
 
-    # And fetcharr is pointed at the throwaway Radarr with that same key (§7.5).
+    # And fetcharr is pointed at both throwaway apps with those same keys (§7.5).
     backend = _environment(services["backend"])
     assert backend["RADARR_URL"] == "http://radarr:7878"
     assert backend["RADARR_API_KEY"] == key
+    assert backend["SONARR_URL"] == "http://sonarr:8989"
+    assert backend["SONARR_API_KEY"] == _environment(services["sonarr"])["SONARR__AUTH__APIKEY"]
 
     # One uid/gid/umask across all three, or an arr app can't delete what fetcharr wrote (§7.6).
     for name in ("backend", "radarr", "sonarr"):

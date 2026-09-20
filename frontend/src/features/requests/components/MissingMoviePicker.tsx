@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { radarrMoviesQueryKey, searchRadarrMovies, type RadarrMovie } from '@/features/arr'
 
 import type { MovieMedia } from '../types'
-import MoviePoster from './MoviePoster'
+import Poster from './Poster'
 
 type Props = {
   value: MovieMedia | null
@@ -46,7 +46,7 @@ export default function MissingMoviePicker({ value, onChange }: Props) {
     const poster = picked?.id === value.radarr_movie_id ? picked.poster : null
     return (
       <div className="flex items-start gap-4">
-        <MoviePoster url={poster} className="w-20" />
+        <Poster url={poster} className="w-20" />
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm">
             <span className="font-medium">
@@ -125,7 +125,7 @@ export default function MissingMoviePicker({ value, onChange }: Props) {
                   onClick={() => choose(movie)}
                   className="h-auto w-full flex-col items-stretch gap-0 overflow-hidden p-0 text-left"
                 >
-                  <MoviePoster url={movie.poster} className="w-full rounded-none" />
+                  <Poster url={movie.poster} className="w-full rounded-none" />
                   <span className="w-full px-2 py-2 text-xs leading-snug whitespace-normal">
                     {movie.title}
                     {movie.year ? ` (${movie.year})` : ''}

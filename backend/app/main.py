@@ -16,7 +16,7 @@ from app.db.session import Database
 from app.events import router as events_router
 from app.events.service import EventHub
 from app.inspections import router as inspections_router
-from app.integrations.arr import RadarrClient
+from app.integrations.arr import RadarrClient, SonarrClient
 from app.jobs import router as jobs_router
 from app.jobs.manager import JobManager
 from app.requests import router as requests_router
@@ -47,15 +47,17 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
             check_paths, settings.completed_dir, settings.incomplete_dir
         )
         _warn_about_paths(app.state.path_report)
-        # Long-lived like the hub and the manager: one connection pool, one movie cache
-        # and one import lock for the whole process (§6.1).
+        # Long-lived like the hub and the manager: one connection pool, one library
+        # cache and one import lock per arr app for the whole process (§6.1).
         app.state.radarr = RadarrClient()
+        app.state.sonarr = SonarrClient()
         app.state.manager = JobManager(
             app.state.db,
             settings,
             app.state.hub,
             SettingsService(app.state.db, settings, app.state.secret_key),
             app.state.radarr,
+            app.state.sonarr,
         )
         await app.state.manager.start()
         try:
@@ -63,6 +65,7 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
         finally:
             await app.state.manager.stop()
             await app.state.radarr.aclose()
+            await app.state.sonarr.aclose()
             await app.state.db.dispose()
 
     app = FastAPI(title="fetcharr", version=settings.app_version, lifespan=lifespan)

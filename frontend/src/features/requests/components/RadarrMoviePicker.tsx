@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { radarrMoviesQueryKey, searchRadarrMovies, type RadarrMovie } from '@/features/arr'
 
 import type { MovieMedia } from '../types'
-import MoviePoster from './MoviePoster'
+import Poster from './Poster'
 
 const WARNING =
   "Radarr doesn't have this movie, so the import will fail. Add it in Radarr first " +
@@ -114,7 +114,7 @@ export default function RadarrMoviePicker({ initialQuery, value, onChange }: Pro
 
       {picked ? (
         <div className="flex items-start gap-4">
-          <MoviePoster url={picked.poster} className="w-20" />
+          <Poster url={picked.poster} className="w-20" />
           <p className="text-sm">
             <span className="font-medium">
               {picked.title}
@@ -146,7 +146,7 @@ export default function RadarrMoviePicker({ initialQuery, value, onChange }: Pro
                   onClick={() => choose(movie)}
                   className="h-auto w-full flex-col items-stretch gap-0 overflow-hidden p-0 text-left"
                 >
-                  <MoviePoster url={movie.poster} className="w-full rounded-none" />
+                  <Poster url={movie.poster} className="w-full rounded-none" />
                   <span className="w-full px-2 py-2 text-xs leading-snug whitespace-normal">
                     {movie.title}
                     {movie.year ? ` (${movie.year})` : ''}

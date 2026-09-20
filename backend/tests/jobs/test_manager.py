@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +12,12 @@ import pytest
 from sqlalchemy import event
 
 from app.config import Settings
+from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
 from app.jobs.constants import JobStatus, Step
 from app.jobs.manager import PROGRESS_DB_INTERVAL_S, JobManager
+from app.library.naming import DailyEpisode, Episode
 from app.library.organizer import MARKER
 from tests.conftest import exists, is_file, names, setup_account, wait_until
 from tests.fake_ytdlp import FakeYtdlp
@@ -406,3 +409,105 @@ async def test_retry_after_a_failed_organize_does_not_download_again(
     assert job.status == JobStatus.COMPLETED, job.error_message
     assert fake_ytdlp.calls == []
     assert is_file(Path(job.completed_path))
+
+
+# ------------------------------------------- M6 AC7: a TV request's jobs
+
+
+async def test_tv_jobs_are_claimed_in_episode_order(
+    make_manager: Callable[..., JobManager],
+    new_job: Callable[..., Any],
+    read_job: Callable[[str], Any],
+) -> None:
+    """AC7 (§6.1): oldest request first, then episode order inside a TV request."""
+    # One `created_at` for the whole request, which is what `POST /api/requests` writes.
+    moment = utcnow()
+    first = await _tv_job(new_job, episode=3, created_at=moment)
+    request_id = (await read_job(first)).request_id
+    for episode in (1, 2):
+        await _tv_job(new_job, episode=episode, created_at=moment, request_id=request_id)
+    # Not started: the claim loop would race this test for the same rows.
+    manager = make_manager()
+
+    claimed = [await manager._claim() for _ in range(4)]
+
+    assert [job.episode for job in claimed[:3]] == [1, 2, 3]
+    assert {job.request_id for job in claimed[:3]} == {request_id}
+    assert claimed[3] is None
+    # The whole target comes back with the row, so the pipeline can name the file (§7.2).
+    assert claimed[0].target() == Episode("Some Show", 1, 1, "Episode 1")
+
+
+async def test_a_daily_tv_job_is_claimed_as_a_dated_episode(
+    make_manager: Callable[..., JobManager], new_job: Callable[..., Any]
+) -> None:
+    """AC7: a daily series carries its air date into the naming target (§7.2)."""
+    await _tv_job(
+        new_job,
+        episode=None,
+        created_at=utcnow(),
+        numbering="daily",
+        season=2024,
+        air_date=date(2024, 3, 15),
+        episode_title="News",
+    )
+    manager = make_manager()
+
+    claimed = await manager._claim()
+
+    assert claimed is not None
+    assert claimed.target() == DailyEpisode("Some Show", date(2024, 3, 15), "News", season=2024)
+
+
+async def test_a_tv_request_summary_counts_each_finished_episode(
+    manager: JobManager,
+    hub: EventHub,
+    new_job: Callable[..., Any],
+    read_job: Callable[[str], Any],
+    fake_ytdlp: FakeYtdlp,
+    media: dict[str, Path],
+) -> None:
+    """AC7: `request.summary` reports 1/3, then 2/3, then 3/3 (§6, §12)."""
+    fake_ytdlp.downloads(media["hd"])
+    moment = utcnow()
+    first = await _tv_job(new_job, episode=1, created_at=moment)
+    request_id = (await read_job(first)).request_id
+    jobs = [first] + [
+        await _tv_job(new_job, episode=n, created_at=moment, request_id=request_id) for n in (2, 3)
+    ]
+
+    async with hub.subscribe() as events:
+        manager.wake()
+        # Awaited off the stream, not polled: `_finish` writes the terminal status before
+        # it publishes the summary, so a job can be done with its event still in flight.
+        summaries = await _summaries(events, request_id, len(jobs))
+
+    assert [(s["completed"], s["total"]) for s in summaries] == [(1, 3), (2, 3), (3, 3)]
+    assert {s["failed"] for s in summaries} == {0}
+    for job_id in jobs:
+        assert (await read_job(job_id)).status == JobStatus.COMPLETED
+
+
+async def _summaries(
+    events: asyncio.Queue[Any], request_id: str, wanted: int
+) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    async with asyncio.timeout(60):
+        while len(found) < wanted:
+            event = await events.get()
+            if event.type == "request.summary" and event.data["request_id"] == request_id:
+                found.append(event.data)
+    return found
+
+
+async def _tv_job(new_job: Callable[..., Any], **fields: Any) -> str:
+    """One episode of "Some Show", as `POST /api/requests` would insert it."""
+    return await new_job(
+        media_type="tv",
+        title="Some Show",
+        numbering=fields.pop("numbering", "standard"),
+        sonarr_series_id=3,
+        season=fields.pop("season", 1),
+        episode_title=fields.pop("episode_title", None) or f"Episode {fields.get('episode')}",
+        **fields,
+    )

@@ -14,9 +14,12 @@ services:
       - PGID=1000
       # The same ids and umask as the arr services, so each can delete the other's files (§7.6).
       - UMASK=002
-      # Pointed at the throwaway Radarr below. Set here, these win over Settings (§7.5).
+      # Pointed at the throwaway Radarr and Sonarr below. Set here, these win over
+      # whatever Settings holds (§7.5).
       - RADARR_URL=http://radarr:7878
       - RADARR_API_KEY=${DEV_RADARR_API_KEY:-0123456789abcdef0123456789abcdef}
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${DEV_SONARR_API_KEY:-fedcba9876543210fedcba9876543210}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
     volumes:
       - ./backend/app:/app/app
@@ -59,8 +62,8 @@ services:
     ports:
       - "7878:7878"
 
-  # Sonarr is here so the TV flow has somewhere to go in M6. fetcharr has no Sonarr client
-  # yet, so nothing talks to it today: it shares the volume and waits.
+  # Throwaway Sonarr for testing the TV flow end to end, on the same host folder at the
+  # same path, so a DownloadedEpisodesScan with "Move" is a rename (§7.1, §7.5).
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
     environment:
