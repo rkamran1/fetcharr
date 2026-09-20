@@ -5,9 +5,9 @@ import pytest
 from sqlalchemy import select
 
 from app import cli
-from app.auth.passwords import hash_password, verify_password
-from app.auth.sessions import SESSION_LIFETIME
-from app.db.models import Account, AuthSession, utcnow
+from app.auth.models import Account, AuthSession
+from app.auth.utils import SESSION_LIFETIME, hash_password, verify_password
+from app.db.base import utcnow
 from app.db.session import Database
 
 OLD_PASSWORD = "old password 1"

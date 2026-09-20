@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from app.ytdlp.options import DownloadOptions
+from app.ytdlp.schemas import DownloadOptions
 from app.ytdlp.stream import Resolved, StreamType, classify, resolve_auto
 
 

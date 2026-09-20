@@ -3,7 +3,7 @@
 import pytest
 
 from app.ytdlp.formats import build_selector
-from app.ytdlp.options import Container, Quality
+from app.ytdlp.schemas import Container, Quality
 
 EXPECTED: dict[tuple[Quality, Container], str] = {
     ("144p", "mkv"): "bv*[height<=144]+ba/b[height<=144]",

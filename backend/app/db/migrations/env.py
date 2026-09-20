@@ -6,13 +6,13 @@ from sqlalchemy import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import Settings
-from app.db.models import Base
+from app.db.registry import metadata
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+target_metadata = metadata
 
 
 def _database_url() -> str:

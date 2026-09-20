@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from app.ytdlp.command import build_argv
-from app.ytdlp.options import DownloadOptions
+from app.ytdlp.schemas import DownloadOptions
 from app.ytdlp.stream import StreamType, resolve_auto
 
 JOB_DIR = Path("/data/incomplete/42")

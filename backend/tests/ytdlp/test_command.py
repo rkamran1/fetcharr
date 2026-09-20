@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.ytdlp.command import build_argv, downgrade_fragments
-from app.ytdlp.options import Container, DownloadOptions
+from app.ytdlp.schemas import Container, DownloadOptions
 from app.ytdlp.stream import Resolved, StreamType
 
 JOB_DIR = Path("/data/incomplete/7")

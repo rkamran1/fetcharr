@@ -13,7 +13,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Where the rest lives (local only, git-ignored)
 
-- `.claude/requirements/inital_requirements.md`: product requirements and architecture (the § references below).
+- `.claude/requirements/inital_requirements.md`: product requirements and architecture (the § references below). For the backend layout, the **Backend structure** section below is the source of truth; §14 follows it.
 - `.claude/plans/<ID>-<slug>.md`: one plan per milestone, implemented with `/dev-workflow-loop <ID>`.
 - `.claude/documentations/`: cached library docs.
 - `legacy/`: the old `download_video.sh` (behavioural reference for the command builder), its `cookies.txt` (live secrets) and old guide. **Read-only, never committed, absent in CI and the Docker build context. No test or build step may read it.**
@@ -38,6 +38,38 @@ Run from the repo root.
 | Image checks (tools, smoke, PUID/PGID, backups, no local files) | `scripts/test-image.sh fetcharr:dev` |
 
 `alembic check` needs a database already at head, and the default `DATABASE_URL` points at `/config` (container only), so the migrations check runs both commands against one temporary database.
+
+## Backend structure
+
+Code is grouped by feature, not by technical layer. `backend/tests/repo/test_structure.py` enforces these rules by parsing the source.
+
+```
+backend/app/
+├── main.py            # create_app: lifespan, include each domain's router, SPA
+├── config.py          # Settings
+├── cli.py             # fetcharr reset-password, through AuthService
+├── db/                # shared infrastructure, no domain code
+│   ├── base.py        # Base, utcnow()
+│   ├── registry.py    # imports every domain's models.py (Alembic metadata)
+│   ├── session.py     # Database: PRAGMAs, read sessions, the single writer
+│   ├── backup.py
+│   └── migrations/
+├── auth/              # domain: router, schemas, service, models, dependencies, exceptions, utils
+├── inspections/       # domain: router, schemas, service, models, dependencies, exceptions, utils
+├── ytdlp/             # library: schemas (DownloadOptions), command, formats, stream, runtime, inspect
+└── library/           # library: naming, organizer, probe
+```
+
+- **Domain package:** a folder under `backend/app/` for one feature. Allowed files: `router.py`, `schemas.py`, `service.py`, `models.py`, `dependencies.py`, `exceptions.py`, `constants.py`, `utils.py`. Create only the files the domain needs. Any other module name needs a line here first.
+- **Library package** (`ytdlp/`, `library/`, later `transcode/`, `integrations/`): no endpoints and no FastAPI imports. Same file names where they apply (`schemas.py` for Pydantic models, `utils.py` for pure helpers); otherwise modules named after what they wrap (`command.py`, `probe.py`). A new library package is added to `LIBRARY_PACKAGES` in `test_structure.py` and to this list; every other package under `app/` (except `db/`) counts as a domain.
+- **`router.py`:** HTTP only. Parse the request (via schemas), call one service method, map domain exceptions to HTTP responses. Never imports `sqlalchemy`, `app.db`, `asyncio.subprocess` or another domain's `service`. Routers are included in `main.py` with `dependencies=[Depends(require_auth)]` unless public by design.
+- **`schemas.py`:** every Pydantic `BaseModel` lives in a `schemas.py`. The only exception is `Settings` in `config.py`.
+- **`service.py`:** one service class per domain (`<Domain>Service`), constructed with its dependencies (`Database`, `Settings`, other services). A `get_<domain>_service` dependency in `dependencies.py` builds it per request. It holds the business logic, all DB access (through `Database.read_session()` / `write_session()`, §3.1) and calls into libraries. It never imports `fastapi` and never raises `HTTPException`: it raises the domain's exceptions.
+- **`models.py`:** the domain's SQLAlchemy models, on `app.db.base.Base`. Every models module is imported in `app/db/registry.py`. Moving a model between modules is not a schema change; `alembic check` must stay clean.
+- **`exceptions.py`:** domain errors carry what the router needs (e.g. status, message, `needs_cookies`); the router maps them. Libraries raise their own errors (e.g. `ytdlp.inspect.YtdlpError(kind, message)`), which the service maps to domain errors.
+- **`utils.py`:** pure functions and small helpers; no DB, no HTTP. Blocking helpers are called through `asyncio.to_thread` by the service.
+- **Imports:** routers → own service/schemas/dependencies; services → own models/schemas/exceptions/utils, libraries, other services; libraries → other libraries only. No cycles, no library importing a domain.
+- **Tests mirror the app:** `tests/<domain>/test_router.py` (HTTP, including the 401 case), `tests/<domain>/test_service.py`, `tests/<domain>/test_utils.py`, and `tests/<library>/…`. Shared fixtures (`app`, `client`, `settings`, `migrated_db_url`, `fake_ytdlp`) live in `tests/conftest.py`.
 
 ## Conventions
 

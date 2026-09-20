@@ -4,8 +4,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from app.ytdlp.formats import build_selector
-from app.ytdlp.options import DownloadOptions
 from app.ytdlp.runtime import JsRuntime
+from app.ytdlp.schemas import DownloadOptions
 from app.ytdlp.stream import Resolved
 
 ARIA2C_ARGS = "aria2c:-x 4 -s 4 -j 4 --file-allocation=none --retry-wait=1"

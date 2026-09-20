@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from app.ytdlp.options import DownloadOptions
+from app.ytdlp.schemas import DownloadOptions
 
 StreamType = Literal["hls", "dash", "http"]
 

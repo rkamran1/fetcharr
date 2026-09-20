@@ -5,11 +5,13 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select, update
 
-from app.db.models import Inspection, utcnow
+from app.db.base import utcnow
+from app.inspections.models import Inspection
+from app.inspections.utils import PLAYLIST_MESSAGE
 from app.ytdlp import inspect
-from app.ytdlp.inspect import PLAYLIST_MESSAGE, build_inspect_argv
+from app.ytdlp.inspect import build_inspect_argv
 from app.ytdlp.runtime import detect_js_runtime
-from tests.api.conftest import setup_account
+from tests.conftest import setup_account
 from tests.fake_ytdlp import FakeYtdlp
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"

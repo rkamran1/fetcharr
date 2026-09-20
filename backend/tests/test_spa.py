@@ -1,6 +1,6 @@
 import httpx
 
-from tests.api.conftest import create_api_key, setup_account
+from tests.conftest import create_api_key, setup_account
 
 INDEX = "<!doctype html><title>fetcharr</title>"
 

@@ -8,13 +8,13 @@ from argon2 import PasswordHasher
 from fastapi import FastAPI
 from sqlalchemy import select, update
 
-from app.auth import passwords
-from app.auth.passwords import hash_token
-from app.auth.sessions import COOKIE_NAME, SESSION_LIFETIME
+from app.auth import utils
+from app.auth.models import Account, AuthSession
+from app.auth.utils import COOKIE_NAME, SESSION_LIFETIME, hash_token
 from app.config import Settings
-from app.db.models import Account, AuthSession, utcnow
+from app.db.base import utcnow
 from app.main import create_app
-from tests.api.conftest import (
+from tests.conftest import (
     PASSWORD,
     USERNAME,
     create_api_key,
@@ -369,7 +369,7 @@ class _SlowHasher(PasswordHasher):
 async def test_setup_and_login_do_not_block_loop(
     monkeypatch: pytest.MonkeyPatch, client: httpx.AsyncClient
 ) -> None:
-    monkeypatch.setattr(passwords, "_hasher", _SlowHasher())
+    monkeypatch.setattr(utils, "_hasher", _SlowHasher())
 
     await setup_account(client)
     client.cookies.clear()
