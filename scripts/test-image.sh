@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks a built fetcharr image: bundled tools, /healthz smoke test, the fetcharr CLI, PUID/PGID handling,
-# pre-migration DB backups and that no local-only file got into the image.
+# the download folders, pre-migration DB backups and that no local-only file got into the image.
 # Usage: scripts/test-image.sh [image]   (default: fetcharr:dev)
 set -euo pipefail
 
@@ -82,6 +82,15 @@ uvicorn_uid="$(docker exec "$puid" sh -c '
 [ "$app_uid" = "1234" ] || fail "puid: id -u app is $app_uid"
 [ "$uvicorn_uid" = "1234" ] || fail "puid: uvicorn runs as uid '$uvicorn_uid'"
 pass "puid: db owned by $owner, uvicorn uid $uvicorn_uid"
+
+# --- downloads: the work folders exist and belong to the app user (§7.6) -------------
+for dir in /web-downloads/incomplete /web-downloads/completed/movies \
+  /web-downloads/completed/tv-shows /web-downloads/completed/other; do
+  dir_owner="$(docker exec "$puid" stat -c %u:%g "$dir")" \
+    || fail "downloads: $dir is missing"
+  [ "$dir_owner" = "1234:1234" ] || fail "downloads: $dir owned by $dir_owner"
+done
+pass "downloads: completed/ and incomplete/ exist and are owned by 1234:1234"
 docker rm -f "$puid" >/dev/null
 
 # --- backup: existing DB is backed up before migrating, newest 5 kept ---------------

@@ -38,6 +38,8 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `COOKIE_SECURE` | `false` | app | add `Secure` to the session cookie. Keep `false` for plain HTTP on the LAN, set `true` behind HTTPS. |
 | `COMPLETED_DIR` | `/web-downloads/completed` | app | finished downloads, in `movies/`, `tv-shows/` and `other/`, waiting for Radarr/Sonarr to import them. |
 | `INCOMPLETE_DIR` | `/web-downloads/incomplete` | app | per-job work folders; replaced files go to `_replaced/`. Keep it on the same volume as `COMPLETED_DIR`. |
+| `MAX_CONCURRENT_DOWNLOADS` | `2` | app | how many downloads run at once. The slot is held only while yt-dlp runs. |
+| `AUTO_RESUME` | `true` | app | after a restart, resume jobs from their last completed step. `false` marks them failed instead, to be retried by hand. |
 | `APP_VERSION` | `dev` | app | version shown in the UI and `/healthz`. Set by the image build (`--build-arg APP_VERSION=…`). |
 
 ## Development
@@ -49,6 +51,12 @@ Requirements: `uv`, Node 22, Docker (with `buildx`).
 uv sync --directory backend
 uv run --directory backend pytest -q
 
+# run it on the host: /web-downloads only exists in the container, so point the
+# download folders somewhere writable first
+export COMPLETED_DIR=./.local/completed INCOMPLETE_DIR=./.local/incomplete
+export DATABASE_URL=sqlite+aiosqlite:///./.local/fetcharr.db
+uv run --directory backend uvicorn app.main:app --reload
+
 # frontend
 npm --prefix frontend ci
 npm --prefix frontend run dev        # proxies /healthz and /api to http://localhost:8000
@@ -56,6 +64,8 @@ npm --prefix frontend run dev        # proxies /healthz and /api to http://local
 # everything in containers, with hot reload, on http://localhost:8686
 docker compose -f docker-compose.dev.yml up --build
 ```
+
+The dev stack writes downloads to `./.local/web-downloads` (git-ignored), so finished files land in `./.local/web-downloads/completed/other/`.
 
 `VITE_PROXY_TARGET` (dev only, default `http://localhost:8000`) sets where the Vite dev server proxies `/healthz` and `/api`.
 

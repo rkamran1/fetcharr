@@ -11,6 +11,8 @@ services:
     volumes:
       - ./backend/app:/app/app
       - fetcharr-dev-config:/config
+      # A host folder, so finished downloads are yours to open (git-ignored).
+      - ./.local/web-downloads:/web-downloads   # completed/ and incomplete/ (§7.6)
     ports:
       - "8000:8000"
 

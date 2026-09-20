@@ -19,6 +19,18 @@ def _size(fmt: dict[str, Any]) -> int | None:
     return int(size) if size else None
 
 
+def _from_bitrate(fmt: dict[str, Any], duration: float | None) -> int | None:
+    """yt-dlp's own approximation: the bitrate over the running time, in bytes.
+
+    Muxed HLS and many progressive formats report no filesize at all, so without this
+    only a couple of heights would ever show a size in the picker.
+    """
+    tbr = fmt.get("tbr")
+    if not tbr or not duration:
+        return None
+    return int(float(tbr) * 1000 / 8 * float(duration))
+
+
 def _has(fmt: dict[str, Any], key: str) -> bool:
     return fmt.get(key) not in (None, "none")
 
@@ -56,15 +68,29 @@ def normalise(info: dict[str, Any], aria2c_available: bool) -> dict[str, Any]:
         key = (f.get("language"), _codec_family(f["acodec"]), abr)
         tracks[key] = {"lang": key[0], "codec": key[1], "abr": key[2]}
 
+    duration = info.get("duration")
     best_audio = max((s for f in audio_only if (s := _size(f))), default=0)
-    sizes: dict[int, int] = {}
+    best_audio_guess = max(
+        (s for f in audio_only if (s := _size(f) or _from_bitrate(f, duration))), default=0
+    )
+    # Reported sizes win; a bitrate estimate only fills a height nothing else covers.
+    known: dict[int, int] = {}
+    guessed: dict[int, int] = {}
     for f in video:
+        height = f["height"]
         size = _size(f)
-        if size is None:
+        if size is not None:
+            if not _has(f, "acodec"):
+                size += best_audio
+            known[height] = max(known.get(height, 0), size)
+            continue
+        estimate = _from_bitrate(f, duration)
+        if estimate is None:
             continue
         if not _has(f, "acodec"):
-            size += best_audio
-        sizes[f["height"]] = max(sizes.get(f["height"], 0), size)
+            estimate += best_audio_guess
+        guessed[height] = max(guessed.get(height, 0), estimate)
+    sizes: dict[int, int] = {h: known.get(h) or guessed[h] for h in {**guessed, **known}}
 
     stream_type = classify(info)
     resolved = resolve_auto(stream_type, DownloadOptions(quality="best"), aria2c_available)

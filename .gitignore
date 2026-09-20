@@ -8,6 +8,7 @@ cookies.txt
 *.db
 *.db-*
 config/
+.local/
 
 # media and partial downloads
 *.mp4

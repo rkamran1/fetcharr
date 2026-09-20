@@ -11,3 +11,7 @@ class Settings(BaseSettings):
     # Both live on the /web-downloads volume, which Radarr/Sonarr must mount at the same path.
     completed_dir: Path = Path("/web-downloads/completed")
     incomplete_dir: Path = Path("/web-downloads/incomplete")
+    # The download slot; held only during the download step (requirements §6.1).
+    max_concurrent_downloads: int = 2
+    # Resume interrupted jobs from their checkpoint on boot; false fails them instead.
+    auto_resume: bool = True

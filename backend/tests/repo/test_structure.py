@@ -24,6 +24,8 @@ DOMAIN_MODULES = {
     "constants.py",
     "utils.py",
 }
+#: The documented exceptions in CLAUDE.md -> Backend structure ("Extra modules").
+EXTRA_MODULES = {"jobs": {"pipeline.py", "manager.py"}}
 FASTAPI = ("fastapi", "starlette")
 
 
@@ -98,6 +100,28 @@ def _subclasses_of(roots: set[str]) -> list[tuple[Path, ast.ClassDef]]:
 
 def test_domain_packages_have_expected_files() -> None:
     expected = {
+        "events": {"router.py", "schemas.py", "service.py", "dependencies.py"},
+        "jobs": {
+            "router.py",
+            "schemas.py",
+            "service.py",
+            "models.py",
+            "dependencies.py",
+            "exceptions.py",
+            "constants.py",
+            "utils.py",
+            "pipeline.py",
+            "manager.py",
+        },
+        "requests": {
+            "router.py",
+            "schemas.py",
+            "service.py",
+            "models.py",
+            "dependencies.py",
+            "exceptions.py",
+        },
+        "system": {"router.py", "schemas.py", "service.py", "dependencies.py", "utils.py"},
         "auth": {
             "router.py",
             "schemas.py",
@@ -137,7 +161,8 @@ def test_only_allowed_module_names() -> None:
         _rel(path)
         for domain in _domains()
         for path in _modules(domain)
-        if path.parent != APP / domain or path.name not in DOMAIN_MODULES
+        if path.parent != APP / domain
+        or path.name not in DOMAIN_MODULES | EXTRA_MODULES.get(domain, set())
     ]
 
     assert offenders == []

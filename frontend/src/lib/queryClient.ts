@@ -1,9 +1,7 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query'
 
 import { ApiError } from '@/api/client'
-
-export const meQueryKey = ['auth', 'me'] as const
-export const authStateQueryKey = ['auth', 'state'] as const
+import { meQueryKey } from '@/features/auth'
 
 export function createQueryClient(): QueryClient {
   // A 401 from any request while signed in means the session is gone: reset the `me`

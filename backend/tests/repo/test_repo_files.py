@@ -27,6 +27,7 @@ GITIGNORE_PATTERNS = [
     ".env*",
     "*.db",
     "config/",
+    ".local/",
     "*.mp4",
     "*.mkv",
     "*.webm",
@@ -42,6 +43,7 @@ GITIGNORE_PATTERNS = [
 DOCKERIGNORE_PATTERNS = [
     "legacy/",
     ".claude/",
+    ".local/",
     ".git/",
     "cookies.txt",
     "yt-dlp-env/",
@@ -109,6 +111,57 @@ def test_path_settings_documented(repo_root: Path) -> None:
     ):
         assert f"{name}={default}" in compose
         assert any(row.startswith(f"| `{name}` | `{default}` |") for row in readme_rows)
+
+
+def test_pipeline_settings_documented(repo_root: Path) -> None:
+    compose = (repo_root / "docker-compose.example.yml").read_text()
+    readme_rows = [
+        line for line in (repo_root / "README.md").read_text().splitlines() if line.startswith("|")
+    ]
+
+    for name, default in (("MAX_CONCURRENT_DOWNLOADS", "2"), ("AUTO_RESUME", "true")):
+        assert f"{name}={default}" in compose
+        assert any(row.startswith(f"| `{name}` | `{default}` |") for row in readme_rows)
+
+
+def test_dev_compose_mounts_the_downloads_directory(repo_root: Path) -> None:
+    compose = yaml.safe_load((repo_root / "docker-compose.dev.yml").read_text())
+    mounts = dict(
+        (volume.split(":")[1], volume.split(":")[0])
+        for volume in compose["services"]["backend"]["volumes"]
+    )
+
+    # Without it the dev container has nowhere to put downloads (§7.6), and a host
+    # folder rather than a named volume keeps finished files openable.
+    assert mounts["/web-downloads"] == "./.local/web-downloads"
+    assert "fetcharr-dev-downloads" not in compose.get("volumes", {})
+
+
+def test_entrypoint_prepares_the_download_folders(repo_root: Path) -> None:
+    entrypoint = (repo_root / "docker" / "entrypoint.sh").read_text()
+
+    # A fresh volume belongs to root, so the app user needs the folders made and handed over.
+    assert 'COMPLETED_DIR="${COMPLETED_DIR:-/web-downloads/completed}"' in entrypoint
+    assert 'INCOMPLETE_DIR="${INCOMPLETE_DIR:-/web-downloads/incomplete}"' in entrypoint
+    assert 'mkdir -p "$dir"' in entrypoint
+    assert 'chown app:app "$dir"' in entrypoint
+    # Never recursive: media Radarr/Sonarr owns must keep its ownership.
+    assert "chown -R" not in entrypoint
+
+
+def test_readme_documents_running_the_backend_on_the_host(repo_root: Path) -> None:
+    development = (repo_root / "README.md").read_text().split("## Development", 1)[1]
+
+    assert "COMPLETED_DIR=" in development
+    assert "INCOMPLETE_DIR=" in development
+
+
+def test_claude_md_documents_the_frontend_structure(repo_root: Path) -> None:
+    claude_md = (repo_root / "CLAUDE.md").read_text()
+
+    assert "## Frontend structure" in claude_md
+    for expected in ("features/<domain>/", "no-restricted-imports", "@/features/<name>"):
+        assert expected in claude_md, expected
 
 
 def test_compose_mounts_web_downloads_volume(repo_root: Path) -> None:

@@ -19,6 +19,21 @@ export default defineConfig([
       ecmaVersion: 2023,
       globals: globals.browser,
     },
+    rules: {
+      // A feature is imported through its index only (@/features/<name>); inside a
+      // feature, use relative paths. See CLAUDE.md → Frontend structure.
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/features/*/*'],
+              message: "Import a feature through its index: '@/features/<name>'.",
+            },
+          ],
+        },
+      ],
+    },
   },
   {
     files: ['src/components/ui/**/*.tsx'],

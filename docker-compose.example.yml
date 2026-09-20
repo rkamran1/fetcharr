@@ -13,6 +13,8 @@ services:
       # - COOKIE_SECURE=false     # set true only behind HTTPS (default false)
       # - COMPLETED_DIR=/web-downloads/completed    # default shown
       # - INCOMPLETE_DIR=/web-downloads/incomplete  # default shown
+      # - MAX_CONCURRENT_DOWNLOADS=2   # default shown; fetcharr runs one process (§6.1)
+      # - AUTO_RESUME=true        # default shown; false fails interrupted jobs instead
       # APP_VERSION is set by the image build; don't override it.
     volumes:
       - /path/to/appdata/fetcharr:/config   # LOCAL disk (SQLite database, backups)

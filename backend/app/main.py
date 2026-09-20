@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,9 +12,17 @@ from app.auth.dependencies import check_origin, require_auth
 from app.auth.utils import LoginRateLimiter
 from app.config import Settings
 from app.db.session import Database
+from app.events import router as events_router
+from app.events.service import EventHub
 from app.inspections import router as inspections_router
+from app.jobs import router as jobs_router
+from app.jobs.manager import JobManager
+from app.requests import router as requests_router
+from app.system import router as system_router
+from app.system.utils import PathReport, check_paths
 
 STATIC_DIR = Path("/app/static")
+logger = logging.getLogger("fetcharr")
 
 
 def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) -> FastAPI:
@@ -22,9 +32,18 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.db = Database(settings.database_url)
+        app.state.hub = EventHub()
+        # Many filesystem calls, so off the event loop (§3.2, §7.6).
+        app.state.path_report = await asyncio.to_thread(
+            check_paths, settings.completed_dir, settings.incomplete_dir
+        )
+        _warn_about_paths(app.state.path_report)
+        app.state.manager = JobManager(app.state.db, settings, app.state.hub)
+        await app.state.manager.start()
         try:
             yield
         finally:
+            await app.state.manager.stop()
             await app.state.db.dispose()
 
     app = FastAPI(title="fetcharr", version=settings.app_version, lifespan=lifespan)
@@ -39,6 +58,10 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     app.include_router(auth_router.public, dependencies=[Depends(check_origin)])
     app.include_router(auth_router.protected, dependencies=[Depends(require_auth)])
     app.include_router(inspections_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(requests_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(jobs_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(events_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(system_router.router, dependencies=[Depends(require_auth)])
 
     @app.api_route(
         "/api/{path:path}",
@@ -61,6 +84,23 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
         return FileResponse(index)
 
     return app
+
+
+def _warn_about_paths(report: PathReport) -> None:
+    """A failing self-test isn't fatal (§7.6), but it must not be a mystery in the logs."""
+    for check in report.checks:
+        if not check.ok:
+            logger.warning(
+                "path self-test failed for %s: %s. Mount the downloads volume, or set "
+                "COMPLETED_DIR and INCOMPLETE_DIR to a folder fetcharr can write to.",
+                check.path,
+                check.error,
+            )
+    if report.ok is False and report.same_filesystem is False:
+        logger.warning(
+            "COMPLETED_DIR and INCOMPLETE_DIR are on different filesystems, so finishing a "
+            "download copies instead of renaming it. Keep both on one volume."
+        )
 
 
 app = create_app()

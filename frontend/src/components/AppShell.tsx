@@ -1,20 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 
-import { getHealth, logout } from '@/api/client'
+import { logout } from '@/features/auth'
+import { getHealth, healthQueryKey } from '@/features/system'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const NAV = [
   { to: '/', label: 'Home' },
-  { to: '/inspect', label: 'Inspect' },
+  { to: '/queue', label: 'Queue' },
   { to: '/settings', label: 'Settings' },
 ]
 
 export default function AppShell() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const health = useQuery({ queryKey: ['healthz'], queryFn: getHealth })
+  const health = useQuery({ queryKey: healthQueryKey, queryFn: getHealth })
   const signOut = useMutation({
     mutationFn: logout,
     onSuccess: () => {
