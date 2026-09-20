@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button'
 import { jobsQueryKey, retryImport } from '../api'
 import type { Job } from '../types'
 
-/** ✅ / ⚠ / ❌ for the Radarr import, with Radarr's reasons verbatim (§7.5, §12). */
+/** ✅ / ⚠ / ❌ for the arr import, with the app's own reasons verbatim (§7.5, §12). */
 export default function ImportBadge({ job }: { job: Job }) {
+  // A TV job was sent to Sonarr; everything else that imports went to Radarr (§7.5).
+  const app = job.media_type === 'tv' ? 'Sonarr' : 'Radarr'
   const queryClient = useQueryClient()
   const retry = useMutation({
     mutationFn: () => retryImport(job.id),
@@ -37,7 +39,7 @@ export default function ImportBadge({ job }: { job: Job }) {
             {job.import_status === 'not_imported' ? '⚠ Not imported' : '❌ Import error'}
           </Badge>
           {reasons.length > 0 && (
-            <ul aria-label="Radarr's reasons" className="text-muted-foreground text-xs">
+            <ul aria-label={`${app}'s reasons`} className="text-muted-foreground text-xs">
               {reasons.map((reason) => (
                 <li key={reason}>{reason}</li>
               ))}
@@ -47,7 +49,7 @@ export default function ImportBadge({ job }: { job: Job }) {
           {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
           {job.completed_path && (
             <p className="text-muted-foreground text-xs break-all">
-              Import manually: open Radarr → Wanted → Manual Import → {job.completed_path}
+              Import manually: open {app} → Wanted → Manual Import → {job.completed_path}
             </p>
           )}
           <Button

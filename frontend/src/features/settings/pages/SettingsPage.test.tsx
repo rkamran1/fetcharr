@@ -1,9 +1,16 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { json, mockApi, noContent, renderApp, sentBodies } from '@/test/mockApi'
 
-const settings = { radarr_url: null, radarr_api_key_set: false, radarr_from_env: false }
+const settings = {
+  radarr_url: null,
+  radarr_api_key_set: false,
+  radarr_from_env: false,
+  sonarr_url: null,
+  sonarr_api_key_set: false,
+  sonarr_from_env: false,
+}
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
@@ -13,6 +20,15 @@ const base = {
 
 function type(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
+}
+
+/** The page holds one card per arr app, so every query is scoped to one of them. */
+function card(name: 'Radarr' | 'Sonarr') {
+  return within(screen.getByRole('region', { name }))
+}
+
+async function findCard(name: 'Radarr' | 'Sonarr') {
+  return within(await screen.findByRole('region', { name }))
 }
 
 async function fillPasswordForm(current: string) {
@@ -76,20 +92,21 @@ describe('Radarr settings', () => {
     const fetchMock = mockApi({
       ...base,
       'GET /api/settings': () =>
-        json({ radarr_url: 'http://radarr:7878', radarr_api_key_set: true, radarr_from_env: false }),
+        json({ ...settings, radarr_url: 'http://radarr:7878', radarr_api_key_set: true }),
       'PATCH /api/settings': () =>
-        json({ radarr_url: 'http://radarr:7878', radarr_api_key_set: true, radarr_from_env: false }),
+        json({ ...settings, radarr_url: 'http://radarr:7878', radarr_api_key_set: true }),
     })
     renderApp('/settings')
 
-    const url = await screen.findByLabelText('Radarr URL')
+    const radarr = await findCard('Radarr')
+    const url = radarr.getByLabelText('Radarr URL')
     await waitFor(() => expect(url).toHaveValue('http://radarr:7878'))
-    const apiKey = screen.getByLabelText('API key')
+    const apiKey = radarr.getByLabelText('API key')
     expect(apiKey).toHaveValue('')
     expect(apiKey).toHaveAttribute('placeholder', 'Set — type a new key to replace it')
 
-    type('API key', 'a-new-key')
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.change(apiKey, { target: { value: 'a-new-key' } })
+    fireEvent.click(radarr.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(sentBodies(fetchMock, 'PATCH /api/settings')).toEqual([
@@ -105,7 +122,7 @@ describe('Radarr settings', () => {
     })
     renderApp('/settings')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Test' }))
+    fireEvent.click((await findCard('Radarr')).getByRole('button', { name: 'Test' }))
 
     expect(await screen.findByText('Connected to Radarr 6.4.4.')).toBeInTheDocument()
   })
@@ -118,7 +135,7 @@ describe('Radarr settings', () => {
     })
     renderApp('/settings')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Test' }))
+    fireEvent.click((await findCard('Radarr')).getByRole('button', { name: 'Test' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent(
       "Radarr didn't answer: Radarr rejected the API key; check it in Settings",
@@ -129,14 +146,96 @@ describe('Radarr settings', () => {
     mockApi({
       ...base,
       'GET /api/settings': () =>
-        json({ radarr_url: 'http://env:7878', radarr_api_key_set: true, radarr_from_env: true }),
+        json({
+          ...settings,
+          radarr_url: 'http://env:7878',
+          radarr_api_key_set: true,
+          radarr_from_env: true,
+        }),
     })
     renderApp('/settings')
 
-    const url = await screen.findByLabelText('Radarr URL')
-    await waitFor(() => expect(url).toBeDisabled())
-    expect(screen.getByLabelText('API key')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
-    expect(screen.getByText(/RADARR_URL and RADARR_API_KEY are set/)).toBeInTheDocument()
+    const radarr = await findCard('Radarr')
+    await waitFor(() => expect(radarr.getByLabelText('Radarr URL')).toBeDisabled())
+    expect(radarr.getByLabelText('API key')).toBeDisabled()
+    expect(radarr.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(radarr.getByText(/RADARR_URL and RADARR_API_KEY are set/)).toBeInTheDocument()
+    // The Sonarr card is configured on its own, so nothing there is locked.
+    expect(card('Sonarr').getByLabelText('Sonarr URL')).toBeEnabled()
+  })
+})
+
+describe('Sonarr settings (AC1)', () => {
+  it('saves the Sonarr URL and key, and never shows the stored key', async () => {
+    const fetchMock = mockApi({
+      ...base,
+      'PATCH /api/settings': () =>
+        json({ ...settings, sonarr_url: 'http://sonarr:8989', sonarr_api_key_set: true }),
+    })
+    renderApp('/settings')
+
+    const sonarr = await findCard('Sonarr')
+    fireEvent.change(sonarr.getByLabelText('Sonarr URL'), {
+      target: { value: 'http://sonarr:8989' },
+    })
+    const apiKey = sonarr.getByLabelText('API key')
+    expect(apiKey).toHaveAttribute('placeholder', 'Not set')
+    fireEvent.change(apiKey, { target: { value: 'sonarr-key' } })
+    fireEvent.click(sonarr.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'PATCH /api/settings')).toEqual([
+        { sonarr_url: 'http://sonarr:8989', sonarr_api_key: 'sonarr-key' },
+      ]),
+    )
+    // The saved key never comes back, only "set".
+    await waitFor(() => expect(sonarr.getByLabelText('API key')).toHaveValue(''))
+  })
+
+  it('tests the Sonarr connection and reports the version', async () => {
+    mockApi({
+      ...base,
+      'POST /api/arr/sonarr/test': () => json({ ok: true, version: '4.0.20', error: null }),
+    })
+    renderApp('/settings')
+
+    fireEvent.click((await findCard('Sonarr')).getByRole('button', { name: 'Test' }))
+
+    expect(await screen.findByText('Connected to Sonarr 4.0.20.')).toBeInTheDocument()
+  })
+
+  it('reports why Sonarr did not answer', async () => {
+    mockApi({
+      ...base,
+      'POST /api/arr/sonarr/test': () =>
+        json({ ok: false, version: null, error: 'Sonarr rejected the API key' }),
+    })
+    renderApp('/settings')
+
+    fireEvent.click((await findCard('Sonarr')).getByRole('button', { name: 'Test' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      "Sonarr didn't answer: Sonarr rejected the API key",
+    )
+  })
+
+  it('locks the Sonarr fields when the environment sets them', async () => {
+    mockApi({
+      ...base,
+      'GET /api/settings': () =>
+        json({
+          ...settings,
+          sonarr_url: 'http://env:8989',
+          sonarr_api_key_set: true,
+          sonarr_from_env: true,
+        }),
+    })
+    renderApp('/settings')
+
+    const sonarr = await findCard('Sonarr')
+    await waitFor(() => expect(sonarr.getByLabelText('Sonarr URL')).toBeDisabled())
+    expect(sonarr.getByLabelText('API key')).toBeDisabled()
+    expect(sonarr.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(sonarr.getByText(/SONARR_URL and SONARR_API_KEY are set/)).toBeInTheDocument()
   })
 })

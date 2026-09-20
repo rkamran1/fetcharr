@@ -10,6 +10,7 @@ import contextlib
 import shutil
 from collections import deque
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +20,12 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
-from app.integrations.arr import ImportPolicy, RadarrClient
+from app.integrations.arr import ArrConnection, ImportPolicy, RadarrClient, SonarrClient
 from app.jobs.constants import ACTIVE_STATUSES, JobStatus, Step
 from app.jobs.models import Job, JobLog
 from app.jobs.pipeline import PipelineContext, execute
 from app.jobs.utils import as_stream_type
-from app.library.naming import Movie, Other, Target
+from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
 from app.library.organizer import CollisionPolicy
 from app.requests.models import Request
 from app.settings.service import SettingsService
@@ -58,13 +59,38 @@ class _Claimed:
     media_type: str
     title: str | None
     year: int | None
+    numbering: str | None
     radarr_movie_id: int | None
+    season: int | None
+    episode: int | None
+    episode_title: str | None
+    air_date: date | None
+    sonarr_episode_id: int | None
 
     def target(self) -> Target:
-        """Radarr's own title and year for a movie, the video's own title for other (§7.2)."""
+        """Arr's own titles for a movie or an episode, the video's own for other (§7.2)."""
         if self.media_type == "movie":
             return Movie(title=self.title or self.source_title, year=self.year)
+        if self.media_type == "tv":
+            return self._episode()
         return Other(title=self.source_title, id=self.video_id)
+
+    def _episode(self) -> Target:
+        series = self.title or self.source_title
+        title = self.episode_title or ""
+        if self.numbering == "daily" and self.air_date is not None:
+            return DailyEpisode(
+                series_title=series,
+                air_date=self.air_date,
+                episode_title=title,
+                season=self.season,
+            )
+        return Episode(
+            series_title=series,
+            season=self.season or 0,
+            episode=self.episode or 0,
+            episode_title=title,
+        )
 
 
 class JobManager:
@@ -75,6 +101,7 @@ class JobManager:
         hub: EventHub,
         settings_service: SettingsService,
         radarr: RadarrClient,
+        sonarr: SonarrClient,
         *,
         download_wait: Any = DOWNLOAD_WAIT,
         import_policy: ImportPolicy | None = None,
@@ -84,6 +111,7 @@ class JobManager:
         self.hub = hub
         self.settings_service = settings_service
         self.radarr = radarr
+        self.sonarr = sonarr
         self.download_wait = download_wait
         self.import_policy = import_policy or ImportPolicy()
         self.aria2c_available = False
@@ -149,7 +177,15 @@ class JobManager:
                     select(Job, Request)
                     .join(Request, Request.id == Job.request_id)
                     .where(Job.status == JobStatus.QUEUED)
-                    .order_by(Request.created_at, Job.created_at, Job.id)
+                    # §6.1: oldest request first, then episode order inside a TV request.
+                    .order_by(
+                        Request.created_at,
+                        Job.created_at,
+                        Job.season,
+                        Job.episode,
+                        Job.air_date,
+                        Job.id,
+                    )
                     .limit(1)
                 )
             ).first()
@@ -180,7 +216,13 @@ class JobManager:
                 media_type=request.media_type,
                 title=request.title,
                 year=request.year,
+                numbering=request.numbering,
                 radarr_movie_id=request.radarr_movie_id,
+                season=job.season,
+                episode=job.episode,
+                episode_title=job.episode_title,
+                air_date=job.air_date,
+                sonarr_episode_id=job.sonarr_episode_id,
             )
         self.hub.publish(
             "job.state", {"job_id": claimed.id, "status": JobStatus.STARTING, "phase": None}
@@ -223,8 +265,13 @@ class JobManager:
         def on_attempt(number: int) -> None:
             self._spawn(self._write_attempt(job.id, number))
 
-        # Resolved before the step starts, so no transaction spans the call to Radarr (§3.1).
-        connection = await self.settings_service.radarr() if job.media_type == "movie" else None
+        # Resolved before the step starts, so no transaction spans the call to arr (§3.1).
+        radarr_connection: ArrConnection | None = None
+        sonarr_connection: ArrConnection | None = None
+        if job.media_type == "movie":
+            radarr_connection = await self.settings_service.radarr()
+        elif job.media_type == "tv":
+            sonarr_connection = await self.settings_service.sonarr()
 
         context = PipelineContext(
             job_id=job.id,
@@ -252,7 +299,10 @@ class JobManager:
             import_status=job.import_status,
             radarr_movie_id=job.radarr_movie_id,
             radarr=self.radarr,
-            radarr_connection=connection,
+            radarr_connection=radarr_connection,
+            sonarr_episode_id=job.sonarr_episode_id,
+            sonarr=self.sonarr,
+            sonarr_connection=sonarr_connection,
             import_policy=self.import_policy,
             download_wait=self.download_wait,
         )

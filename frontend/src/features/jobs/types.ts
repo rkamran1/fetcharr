@@ -18,6 +18,9 @@ export type ImportDetail = { rejections?: string[]; error?: string; hint?: strin
 export type Job = {
   id: string
   request_id: string
+  /** The request this job belongs to, so the queue can group and name it (§12). */
+  media_type: 'other' | 'movie' | 'tv'
+  request_title: string | null
   url: string
   source_title: string | null
   thumbnail_url: string | null
@@ -32,6 +35,11 @@ export type Job = {
   eta_s: number | null
   completed_path: string | null
   file_size: number | null
+  /** Which episode this is (tv only). */
+  season: number | null
+  episode: number | null
+  episode_title: string | null
+  air_date: string | null
   import_status: ImportStatus
   import_attempts: number
   import_detail: ImportDetail | null

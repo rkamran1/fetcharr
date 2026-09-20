@@ -1,12 +1,13 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, utcnow
 from app.jobs.constants import ImportStatus, JobStatus
 from app.library.organizer import CollisionPolicy
+from app.requests.models import Request
 
 
 class Job(Base):
@@ -23,6 +24,8 @@ class Job(Base):
     request_id: Mapped[str] = mapped_column(
         String, ForeignKey("requests.id", ondelete="CASCADE"), index=True
     )
+    # Read with the job, so the queue can name a request without a second round trip (§12).
+    request: Mapped[Request] = relationship(lazy="joined", innerjoin=True)
 
     # Source, from the inspection.
     url: Mapped[str] = mapped_column(String)
@@ -58,6 +61,14 @@ class Job(Base):
     probed: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     # What to do when the destination is already taken; the wizard asks first (§7.3).
     collision_policy: Mapped[str] = mapped_column(String, default=CollisionPolicy.KEEP_BOTH)
+
+    # Which episode this is (tv only, §10). `episode` is empty for a daily series, where
+    # `air_date` names it instead.
+    season: Mapped[int | None] = mapped_column(Integer)
+    episode: Mapped[int | None] = mapped_column(Integer)
+    sonarr_episode_id: Mapped[int | None] = mapped_column(Integer)
+    episode_title: Mapped[str | None] = mapped_column(String)
+    air_date: Mapped[date | None] = mapped_column(Date)
 
     # The Radarr/Sonarr import (§7.5). A failed import never fails the job itself (§6).
     import_status: Mapped[str] = mapped_column(String, default=ImportStatus.NOT_APPLICABLE)

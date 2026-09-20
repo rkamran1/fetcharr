@@ -16,16 +16,19 @@ from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.manager import JobManager
 from app.jobs.models import Job
 from app.jobs.service import JobService
-from app.library.naming import Movie, Other, Target, build_path
+from app.library.naming import DailyEpisode, Episode, Movie, Other, Target, build_path
 from app.requests.exceptions import InspectionNotFound, RequestNotFound, UnnameableVideo
 from app.requests.models import Request
 from app.requests.schemas import (
     CreatedRequest,
     CreateRequest,
+    EpisodeRef,
     MediaDetails,
+    MovieMedia,
     PathPreview,
     PreviewRequest,
     RequestRead,
+    TvMedia,
 )
 from app.requests.utils import estimated_quality
 from app.ytdlp.schemas import DownloadOptions
@@ -51,10 +54,12 @@ class RequestService:
         request_id = str(uuid.uuid4())
         now = utcnow()
         job_ids = [str(uuid.uuid4()) for _ in infos]
-        movie = body.media
-        # A movie job still has to be imported; `other` has nothing to import (§6).
+        media = body.media
+        movie = media if isinstance(media, MovieMedia) else None
+        series = media if isinstance(media, TvMedia) else None
+        # A movie or an episode still has to be imported; `other` has nothing to (§6).
         import_status = (
-            ImportStatus.PENDING if body.media_type == "movie" else ImportStatus.NOT_APPLICABLE
+            ImportStatus.NOT_APPLICABLE if body.media_type == "other" else ImportStatus.PENDING
         )
 
         async with self.db.write_session() as session:
@@ -62,16 +67,19 @@ class RequestService:
                 Request(
                     id=request_id,
                     media_type=body.media_type,
-                    title=movie.title if movie else _title(infos[0]),
+                    title=media.title if media else _title(infos[0]),
                     year=movie.year if movie else infos[0].get("release_year"),
+                    numbering=series.numbering if series else None,
                     radarr_movie_id=movie.radarr_movie_id if movie else None,
+                    sonarr_series_id=series.sonarr_series_id if series else None,
                     options=body.options.model_dump(),
                     created_at=now,
                 )
             )
             # No ORM relationship between the two, so the parent row is flushed first.
             await session.flush()
-            for job_id, info in zip(job_ids, infos, strict=True):
+            for job_id, info, item in zip(job_ids, infos, body.items, strict=True):
+                episode = item.episode or EpisodeRef()
                 # Each job works in its own folder and moves out only when finished (§7.4).
                 session.add(
                     Job(
@@ -88,6 +96,11 @@ class RequestService:
                         step_timings={},
                         sidecar_paths=[],
                         collision_policy=body.collision_policy,
+                        season=episode.season,
+                        episode=episode.number,
+                        sonarr_episode_id=episode.sonarr_episode_id,
+                        episode_title=episode.title or None,
+                        air_date=episode.air_date,
                         import_status=import_status,
                         import_attempts=0,
                         max_attempts=body.options.retries + 1,
@@ -118,7 +131,7 @@ class RequestService:
 
     async def preview(self, body: PreviewRequest) -> PathPreview:
         info = await self._inspection(body.inspection_id)
-        path = self._path_for(info, body.options, body)
+        path = self._path_for(info, body.options, body, body.episode)
         # A stat is blocking, and the answer decides whether the wizard has to ask (§3.2).
         exists = await asyncio.to_thread(path.is_file)
         return PathPreview(path=str(path), exists=exists)
@@ -131,9 +144,13 @@ class RequestService:
             return dict(row.info)
 
     def _path_for(
-        self, info: dict[str, Any], options: DownloadOptions, details: MediaDetails
+        self,
+        info: dict[str, Any],
+        options: DownloadOptions,
+        details: MediaDetails,
+        episode: EpisodeRef | None = None,
     ) -> Path:
-        target = target_for(details, info)
+        target = target_for(details, info, episode)
         try:
             # The real quality is only known after ffprobe, so the preview estimates it (§7.2).
             relative = build_path(target, estimated_quality(info, options), f".{options.container}")
@@ -142,11 +159,38 @@ class RequestService:
         return self.settings.completed_dir / relative
 
 
-def target_for(details: MediaDetails, info: dict[str, Any]) -> Target:
-    """The naming target: Radarr's own title and year for a movie, the video's own for other."""
-    if details.media is not None:
-        return Movie(title=details.media.title, year=details.media.year)
-    return Other(title=_title(info), id=str(info.get("id") or ""))
+def target_for(
+    details: MediaDetails, info: dict[str, Any], episode: EpisodeRef | None = None
+) -> Target:
+    """The naming target: arr's own titles for a movie or an episode, the video's for other."""
+    match details.media:
+        case MovieMedia():
+            return Movie(title=details.media.title, year=details.media.year)
+        case TvMedia():
+            return episode_target(details.media, episode or EpisodeRef())
+        case _:
+            return Other(title=_title(info), id=str(info.get("id") or ""))
+
+
+def episode_target(series: TvMedia, episode: EpisodeRef) -> Target:
+    """Sonarr's series and episode titles, numbered the way Sonarr numbers them (§7.2)."""
+    if series.numbering == "daily":
+        if episode.air_date is None:
+            raise UnnameableVideo("a daily episode needs an air date")
+        return DailyEpisode(
+            series_title=series.title,
+            air_date=episode.air_date,
+            episode_title=episode.title,
+            season=episode.season,
+        )
+    if episode.number is None:
+        raise UnnameableVideo("a standard episode needs an episode number")
+    return Episode(
+        series_title=series.title,
+        season=episode.season or 0,
+        episode=episode.number,
+        episode_title=episode.title,
+    )
 
 
 def _title(info: dict[str, Any]) -> str:

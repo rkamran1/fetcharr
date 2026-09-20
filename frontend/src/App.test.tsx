@@ -169,4 +169,23 @@ describe('app shell', () => {
       expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument(),
     )
   })
+
+  it('opens the TV wizard from the home page', async () => {
+    mockApi({
+      'GET /api/auth/me': () => json({ username: 'owner' }),
+      'GET /healthz': health,
+      'GET /api/arr/sonarr/series?q=&missing=true': () => json({ series: [] }),
+    })
+    renderApp('/')
+
+    fireEvent.click(await screen.findByRole('link', { name: /TV Show/ }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Download TV Show' }),
+    ).toBeInTheDocument()
+    // The landing page is the missing list itself, with nothing to paste first (AC17).
+    expect(
+      await screen.findByText("Sonarr isn't missing episodes from anything that matches."),
+    ).toBeInTheDocument()
+  })
 })

@@ -19,9 +19,12 @@ services:
       # the key file on first start; back it up with /config or the stored keys are lost.
       # - SECRET_KEY=                # a Fernet key (32 url-safe base64 bytes); overrides the file
       # - SECRET_KEY_FILE=/config/secret.key   # default shown
-      # Radarr, if you would rather configure it here than in Settings. Set here, these win.
+      # Radarr and Sonarr, if you would rather configure them here than in Settings.
+      # Set here, these win over whatever Settings holds.
       # - RADARR_URL=http://radarr:7878
       # - RADARR_API_KEY=
+      # - SONARR_URL=http://sonarr:8989
+      # - SONARR_API_KEY=
       # APP_VERSION is set by the image build; don't override it.
     volumes:
       - /path/to/appdata/fetcharr:/config   # LOCAL disk (SQLite database, backups)

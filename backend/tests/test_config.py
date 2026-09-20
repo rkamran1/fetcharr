@@ -41,8 +41,15 @@ def test_pipeline_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.auto_resume is False
 
 
-def test_secret_and_radarr_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("SECRET_KEY", "SECRET_KEY_FILE", "RADARR_URL", "RADARR_API_KEY"):
+def test_secret_and_arr_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "SECRET_KEY",
+        "SECRET_KEY_FILE",
+        "RADARR_URL",
+        "RADARR_API_KEY",
+        "SONARR_URL",
+        "SONARR_API_KEY",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     settings = Settings()
@@ -51,11 +58,15 @@ def test_secret_and_radarr_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.secret_key_file == Path("/config/secret.key")
     assert settings.radarr_url is None
     assert settings.radarr_api_key is None
+    assert settings.sonarr_url is None
+    assert settings.sonarr_api_key is None
 
     monkeypatch.setenv("SECRET_KEY", "a-key")
     monkeypatch.setenv("SECRET_KEY_FILE", "/run/secrets/fetcharr")
     monkeypatch.setenv("RADARR_URL", "http://radarr:7878")
     monkeypatch.setenv("RADARR_API_KEY", "abc")
+    monkeypatch.setenv("SONARR_URL", "http://sonarr:8989")
+    monkeypatch.setenv("SONARR_API_KEY", "def")
 
     settings = Settings()
 
@@ -63,3 +74,5 @@ def test_secret_and_radarr_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.secret_key_file == Path("/run/secrets/fetcharr")
     assert settings.radarr_url == "http://radarr:7878"
     assert settings.radarr_api_key == "abc"
+    assert settings.sonarr_url == "http://sonarr:8989"
+    assert settings.sonarr_api_key == "def"

@@ -12,6 +12,8 @@ const base = {
 const job: Job = {
   id: 'job-1',
   request_id: 'req-1',
+  media_type: 'other',
+  request_title: 'Big Buck Bunny',
   url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
   source_title: 'Big Buck Bunny',
   thumbnail_url: null,
@@ -26,6 +28,10 @@ const job: Job = {
   eta_s: 18,
   completed_path: null,
   file_size: null,
+  season: null,
+  episode: null,
+  episode_title: null,
+  air_date: null,
   import_status: 'n/a',
   import_attempts: 0,
   import_detail: null,
@@ -249,5 +255,125 @@ describe('QueuePage', () => {
 
     const log = await screen.findByRole('region', { name: 'Log' })
     await waitFor(() => expect(log).toHaveTextContent('[download] 10.0%'))
+  })
+})
+
+// ------------------------------------------------ M6 AC9/AC12: a TV request
+
+/** One episode of a three-episode TV request (§12). */
+function episodeJob(number: number, overrides: Partial<Job> = {}): Job {
+  return {
+    ...job,
+    id: `tv-${number}`,
+    request_id: 'req-tv',
+    media_type: 'tv',
+    request_title: 'Some Show',
+    source_title: `Some Show Ep ${number}`,
+    season: 1,
+    episode: number,
+    episode_title: `Episode ${number}`,
+    import_status: 'pending',
+    ...overrides,
+  }
+}
+
+describe('a TV request in the queue (AC12)', () => {
+  it('groups the episodes under the series and season with a done count', async () => {
+    mockApi({
+      ...base,
+      'GET /api/jobs': () =>
+        json({
+          jobs: [
+            episodeJob(2),
+            episodeJob(1, { status: 'completed', progress_pct: 100, import_status: 'imported' }),
+            episodeJob(3),
+          ],
+        }),
+    })
+    mockEventSource()
+    renderApp('/queue')
+
+    const group = await screen.findByRole('region', { name: 'Some Show · Season 1' })
+    const headings = within(group).getAllByRole('heading', { level: 2 })
+    // One episode of three has finished (§12).
+    expect(headings[0]).toHaveTextContent('Some Show · Season 11/3')
+    // Episode order inside the request, however the list arrived (§6.1).
+    expect(headings.slice(1).map((heading) => heading.textContent)).toEqual([
+      'S01E01 — Episode 1',
+      'S01E02 — Episode 2',
+      'S01E03 — Episode 3',
+    ])
+  })
+
+  it('shows each episode its own progress and import badge', async () => {
+    mockApi({
+      ...base,
+      'GET /api/jobs': () =>
+        json({
+          jobs: [
+            episodeJob(1, {
+              status: 'completed',
+              import_status: 'imported',
+              imported_path: '/library/tv-shows/Some Show/Season 1/Some Show - S01E01.mkv',
+            }),
+            episodeJob(2, { status: 'downloading', progress_pct: 42 }),
+          ],
+        }),
+    })
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('✅ Imported')).toBeInTheDocument()
+    expect(
+      screen.getByText('/library/tv-shows/Some Show/Season 1/Some Show - S01E01.mkv'),
+    ).toBeInTheDocument()
+    // Only the running episode has a progress bar, and it is its own.
+    const bars = screen.getAllByRole('progressbar')
+    expect(bars).toHaveLength(1)
+    expect(bars[0]).toHaveAttribute('aria-valuenow', '42')
+  })
+
+  it("shows Sonarr's rejection reasons and retries the import (AC9)", async () => {
+    const rejected = episodeJob(2, {
+      status: 'completed',
+      import_status: 'not_imported',
+      completed_path: '/web-downloads/completed/tv-shows/Some Show/Season 1/ep2.mkv',
+      import_detail: {
+        rejections: ['Not an upgrade for existing episode file(s)', 'Sample'],
+      },
+    })
+    const fetchMock = mockApi({
+      ...base,
+      'GET /api/jobs': () => json({ jobs: [rejected] }),
+      'POST /api/jobs/tv-2/import': () => json({ ...rejected, import_status: 'pending' }),
+    })
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('⚠ Not imported')).toBeInTheDocument()
+    // Sonarr's words, under Sonarr's name: a TV job never went to Radarr (§7.5).
+    const reasons = within(screen.getByRole('list', { name: "Sonarr's reasons" })).getAllByRole(
+      'listitem',
+    )
+    expect(reasons.map((item) => item.textContent)).toEqual([
+      'Not an upgrade for existing episode file(s)',
+      'Sample',
+    ])
+    expect(screen.getByText(/Import manually: open Sonarr/)).toHaveTextContent(
+      rejected.completed_path!,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry import' }))
+
+    await waitFor(() => expect(sentBodies(fetchMock, 'POST /api/jobs/tv-2/import')).toHaveLength(1))
+  })
+
+  it('leaves a single-job request without a group heading', async () => {
+    mockQueue()
+    mockEventSource()
+    renderApp('/queue')
+
+    await screen.findByText('Big Buck Bunny')
+    expect(screen.queryByRole('heading', { level: 2, name: /\d\/\d/ })).not.toBeInTheDocument()
   })
 })

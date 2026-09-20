@@ -23,6 +23,8 @@ USERNAME = "owner"
 PASSWORD = "correct horse battery"
 RADARR_URL = "http://radarr.test:7878"
 RADARR_API_KEY = "0123456789abcdef0123456789abcdef"
+SONARR_URL = "http://sonarr.test:8989"
+SONARR_API_KEY = "fedcba9876543210fedcba9876543210"
 
 SIZES = {
     "landscape": (1920, 1080),
@@ -112,6 +114,15 @@ async def configure_radarr(
 ) -> None:
     response = await client.patch(
         "/api/settings", json={"radarr_url": url, "radarr_api_key": api_key}
+    )
+    assert response.status_code == 200, response.text
+
+
+async def configure_sonarr(
+    client: httpx.AsyncClient, url: str = SONARR_URL, api_key: str = SONARR_API_KEY
+) -> None:
+    response = await client.patch(
+        "/api/settings", json={"sonarr_url": url, "sonarr_api_key": api_key}
     )
     assert response.status_code == 200, response.text
 

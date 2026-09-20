@@ -1,4 +1,4 @@
-"""The Radarr test button and the movie picker (§5 step 2a, §11; M5b AC2/AC3, M5c AC1-AC3)."""
+"""The arr test buttons and the pickers (§5 steps 2a/2b, §11; M5b, M5c and M6 AC1/AC2/AC14)."""
 
 from typing import Any
 
@@ -7,8 +7,16 @@ import pytest
 import respx
 from fastapi import FastAPI
 
-from app.integrations.arr import MOVIE_CACHE_TTL_S
-from tests.conftest import RADARR_API_KEY, RADARR_URL, configure_radarr, setup_account
+from app.integrations.arr import MOVIE_CACHE_TTL_S, SERIES_CACHE_TTL_S
+from tests.conftest import (
+    RADARR_API_KEY,
+    RADARR_URL,
+    SONARR_API_KEY,
+    SONARR_URL,
+    configure_radarr,
+    configure_sonarr,
+    setup_account,
+)
 
 #: One movie of each shape "missing" has to tell apart (M5c AC1).
 MOVIES: list[dict[str, Any]] = [
@@ -313,3 +321,342 @@ async def test_movies_require_a_session(client: httpx.AsyncClient) -> None:
     client.cookies.clear()
 
     assert (await client.get("/api/arr/radarr/movies")).status_code == 401
+
+
+# ------------------------------------------------ M6 AC1/AC2/AC14: Sonarr
+
+
+#: One standard series with two seasons, and one daily series (§5 step 2b).
+SERIES: list[dict[str, Any]] = [
+    {
+        "id": 3,
+        "title": "Some Show",
+        "seriesType": "standard",
+        "monitored": True,
+        "seasons": [
+            # Airing: four have aired, Sonarr holds one, so three are missing.
+            {
+                "seasonNumber": 2,
+                "statistics": {
+                    "episodeFileCount": 1,
+                    "episodeCount": 4,
+                    "totalEpisodeCount": 10,
+                },
+            },
+            {
+                "seasonNumber": 0,
+                "statistics": {"episodeFileCount": 0, "episodeCount": 0, "totalEpisodeCount": 3},
+            },
+            {
+                "seasonNumber": 1,
+                "statistics": {"episodeFileCount": 8, "episodeCount": 8, "totalEpisodeCount": 8},
+            },
+        ],
+        "images": [
+            {"coverType": "banner", "remoteUrl": "https://artworks.thetvdb.com/banner.jpg"},
+            {"coverType": "poster", "remoteUrl": "https://artworks.thetvdb.com/show.jpg"},
+        ],
+    },
+    {
+        "id": 5,
+        "title": "Daily Show",
+        "seriesType": "daily",
+        # Complete: nothing missing, so the missing filter leaves it out.
+        "monitored": True,
+        "seasons": [
+            {
+                "seasonNumber": 2024,
+                "statistics": {"episodeFileCount": 6, "episodeCount": 6, "totalEpisodeCount": 6},
+            }
+        ],
+        "images": [{"coverType": "fanart", "url": "/MediaCover/5/fanart.jpg"}],
+    },
+]
+
+EPISODES: list[dict[str, Any]] = [
+    {
+        "id": 101,
+        "seriesId": 3,
+        "seasonNumber": 1,
+        "episodeNumber": 1,
+        "title": "Pilot",
+        "airDate": "2024-03-14",
+        "hasFile": True,
+        "episodeFile": {"quality": {"quality": {"name": "WEBDL-720p"}}},
+    },
+    {
+        "id": 102,
+        "seriesId": 3,
+        "seasonNumber": 1,
+        "episodeNumber": 2,
+        "title": "Second",
+        "airDate": "2024-03-15",
+        "hasFile": False,
+    },
+]
+
+
+@pytest.fixture
+async def sonarr_signed_in(client: httpx.AsyncClient) -> httpx.AsyncClient:
+    await setup_account(client)
+    await configure_sonarr(client)
+    return client
+
+
+async def test_the_sonarr_test_reports_the_version(sonarr_signed_in: httpx.AsyncClient) -> None:
+    """AC1: the Settings Test button, answering exactly as Radarr's does."""
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        route = mock.get("/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.20"})
+        )
+
+        response = await sonarr_signed_in.post("/api/arr/sonarr/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "version": "4.0.20", "error": None}
+    assert route.calls[0].request.headers["X-Api-Key"] == SONARR_API_KEY
+
+
+async def test_the_sonarr_test_reports_a_bad_api_key(
+    sonarr_signed_in: httpx.AsyncClient,
+) -> None:
+    """AC1: a 401 is a message to read, not an HTTP error to handle."""
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        mock.get("/api/v3/system/status").mock(return_value=httpx.Response(401))
+
+        response = await sonarr_signed_in.post("/api/arr/sonarr/test")
+
+    body = response.json()
+    assert body["ok"] is False
+    assert "API key" in body["error"]
+    assert "Sonarr" in body["error"]
+    assert body["version"] is None
+
+
+async def test_the_sonarr_test_reports_an_unreachable_sonarr(
+    sonarr_signed_in: httpx.AsyncClient,
+) -> None:
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        mock.get("/api/v3/system/status").mock(side_effect=httpx.ConnectError("no route to host"))
+
+        response = await sonarr_signed_in.post("/api/arr/sonarr/test")
+
+    body = response.json()
+    assert body["ok"] is False
+    assert "unreachable" in body["error"]
+
+
+async def test_the_sonarr_test_reports_that_sonarr_is_not_configured(
+    client: httpx.AsyncClient,
+) -> None:
+    await setup_account(client)
+
+    response = await client.post("/api/arr/sonarr/test")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert "not configured" in response.json()["error"]
+
+
+async def test_series_are_returned_and_narrowed_by_the_query(
+    sonarr_signed_in: httpx.AsyncClient,
+) -> None:
+    """AC2: id, title, series type and the seasons the wizard's dropdown lists."""
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        route = mock.get("/api/v3/series").mock(return_value=httpx.Response(200, json=SERIES))
+
+        everything = await sonarr_signed_in.get("/api/arr/sonarr/series")
+        narrowed = await sonarr_signed_in.get("/api/arr/sonarr/series", params={"q": "daily show"})
+
+    assert [show["title"] for show in everything.json()["series"]] == ["Some Show", "Daily Show"]
+    show = everything.json()["series"][0]
+    assert (show["id"], show["series_type"]) == (3, "standard")
+    # Seasons come back in order, Specials first, with Sonarr's own counts.
+    assert show["seasons"] == [
+        {"number": 0, "episode_file_count": 0, "episode_count": 0, "total_episode_count": 3},
+        {"number": 1, "episode_file_count": 8, "episode_count": 8, "total_episode_count": 8},
+        {"number": 2, "episode_file_count": 1, "episode_count": 4, "total_episode_count": 10},
+    ]
+    assert everything.json()["series"][1]["series_type"] == "daily"
+    assert [show["title"] for show in narrowed.json()["series"]] == ["Daily Show"]
+    # The second lookup came out of the five-minute cache (AC2).
+    assert route.call_count == 1
+
+
+async def test_a_second_series_lookup_inside_five_minutes_hits_the_cache(
+    app: FastAPI, sonarr_signed_in: httpx.AsyncClient
+) -> None:
+    """AC2: cached for five minutes, and re-read once that has passed."""
+    now = [1000.0]
+    app.state.sonarr.clock = lambda: now[0]
+
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        route = mock.get("/api/v3/series").mock(return_value=httpx.Response(200, json=SERIES))
+
+        await sonarr_signed_in.get("/api/arr/sonarr/series")
+        now[0] += SERIES_CACHE_TTL_S - 1
+        await sonarr_signed_in.get("/api/arr/sonarr/series")
+        assert route.call_count == 1
+
+        now[0] += 2
+        await sonarr_signed_in.get("/api/arr/sonarr/series")
+
+    assert route.call_count == 2
+
+
+async def test_a_series_poster_reaches_the_picker(sonarr_signed_in: httpx.AsyncClient) -> None:
+    """AC14: Sonarr's own poster, and None for a series that has none."""
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        mock.get("/api/v3/series").mock(return_value=httpx.Response(200, json=SERIES))
+
+        response = await sonarr_signed_in.get("/api/arr/sonarr/series")
+
+    series = response.json()["series"]
+    assert series[0]["poster"] == "https://artworks.thetvdb.com/show.jpg"
+    # Fanart is not a poster, so the picker falls back to its placeholder.
+    assert series[1]["poster"] is None
+
+
+async def test_episodes_are_returned_for_one_season(
+    sonarr_signed_in: httpx.AsyncClient,
+) -> None:
+    """AC2: number, title, air date, has-file and the quality Sonarr already holds."""
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        route = mock.get("/api/v3/episode").mock(
+            return_value=httpx.Response(200, json=list(reversed(EPISODES)))
+        )
+
+        response = await sonarr_signed_in.get(
+            "/api/arr/sonarr/series/3/episodes", params={"season": 1}
+        )
+
+    assert response.status_code == 200
+    # Ordered by episode number, however Sonarr returned them.
+    assert response.json()["episodes"] == [
+        {
+            "id": 101,
+            "season": 1,
+            "number": 1,
+            "title": "Pilot",
+            "air_date": "2024-03-14",
+            "has_file": True,
+            "quality": "WEBDL-720p",
+        },
+        {
+            "id": 102,
+            "season": 1,
+            "number": 2,
+            "title": "Second",
+            "air_date": "2024-03-15",
+            "has_file": False,
+            "quality": None,
+        },
+    ]
+    query = dict(route.calls[0].request.url.params)
+    assert query == {"seriesId": "3", "includeEpisodeFile": "true", "seasonNumber": "1"}
+
+
+async def test_episodes_report_sonarr_unavailable(sonarr_signed_in: httpx.AsyncClient) -> None:
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        mock.get("/api/v3/episode").mock(return_value=httpx.Response(503))
+
+        response = await sonarr_signed_in.get("/api/arr/sonarr/series/3/episodes")
+
+    assert response.status_code == 502
+    assert "503" in response.json()["detail"]
+
+
+async def test_series_report_an_unconfigured_sonarr(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+
+    response = await client.get("/api/arr/sonarr/series")
+
+    assert response.status_code == 400
+    assert "not configured" in response.json()["detail"]
+
+
+# --------------------------------------------- M6 AC15: the missing series
+
+
+#: Added unmonitored, so Sonarr reports nothing "wanted" — but the files aren't there.
+#: This is the Breaking Bad shape the owner hit during the M6 review.
+UNMONITORED = {
+    "id": 9,
+    "title": "Abandoned Show",
+    "seriesType": "standard",
+    "monitored": False,
+    "seasons": [
+        {
+            "seasonNumber": 1,
+            "statistics": {"episodeFileCount": 0, "episodeCount": 0, "totalEpisodeCount": 6},
+        }
+    ],
+}
+
+#: Complete: every episode Sonarr knows about is already on disk.
+COMPLETE = {
+    "id": 11,
+    "title": "Finished Show",
+    "seriesType": "standard",
+    "monitored": True,
+    "seasons": [
+        {
+            "seasonNumber": 1,
+            "statistics": {"episodeFileCount": 6, "episodeCount": 6, "totalEpisodeCount": 6},
+        }
+    ],
+}
+
+
+async def test_series_can_be_narrowed_to_the_ones_missing_episodes(
+    sonarr_signed_in: httpx.AsyncClient,
+) -> None:
+    """AC15: short of a file Sonarr knows it should have, whatever it is monitoring."""
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        route = mock.get("/api/v3/series").mock(
+            return_value=httpx.Response(200, json=[*SERIES, UNMONITORED, COMPLETE])
+        )
+
+        everything = await sonarr_signed_in.get("/api/arr/sonarr/series")
+        missing = await sonarr_signed_in.get("/api/arr/sonarr/series", params={"missing": "true"})
+        narrowed = await sonarr_signed_in.get(
+            "/api/arr/sonarr/series", params={"missing": "true", "q": "abandoned"}
+        )
+
+    assert [show["title"] for show in everything.json()["series"]] == [
+        "Some Show",
+        "Daily Show",
+        "Abandoned Show",
+        "Finished Show",
+    ]
+    # "Daily Show" and "Finished Show" have every episode on disk. The unmonitored one is
+    # listed, which is the whole point: Sonarr will never fill it on its own (M6 review).
+    assert [show["title"] for show in missing.json()["series"]] == ["Some Show", "Abandoned Show"]
+    assert [show["title"] for show in narrowed.json()["series"]] == ["Abandoned Show"]
+    # The filter runs over the one cached list, so it costs Sonarr nothing (M5c).
+    assert route.call_count == 1
+
+
+async def test_refreshing_the_series_list_re_reads_sonarr(
+    sonarr_signed_in: httpx.AsyncClient,
+) -> None:
+    """AC15: saving Sonarr settings doesn't clear the cache, so Refresh is the way past it."""
+    later = [*SERIES, UNMONITORED | {"monitored": True, "title": "Newly Added"}]
+    async with respx.mock(base_url=SONARR_URL) as mock:
+        route = mock.get("/api/v3/series").mock(
+            side_effect=[
+                httpx.Response(200, json=SERIES),
+                httpx.Response(200, json=later),
+            ]
+        )
+
+        first = await sonarr_signed_in.get("/api/arr/sonarr/series", params={"missing": "true"})
+        cached = await sonarr_signed_in.get("/api/arr/sonarr/series", params={"missing": "true"})
+        refreshed = await sonarr_signed_in.get(
+            "/api/arr/sonarr/series", params={"missing": "true", "refresh": "true"}
+        )
+
+    assert route.call_count == 2
+    assert [show["title"] for show in first.json()["series"]] == ["Some Show"]
+    assert [show["title"] for show in cached.json()["series"]] == ["Some Show"]
+    assert [show["title"] for show in refreshed.json()["series"]] == ["Some Show", "Newly Added"]

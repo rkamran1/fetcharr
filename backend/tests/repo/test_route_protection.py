@@ -67,6 +67,10 @@ async def test_every_non_public_api_route_requires_auth(
         ("PATCH", "/api/settings"),
         ("POST", "/api/arr/radarr/test"),
         ("GET", "/api/arr/radarr/movies"),
+        # M6's endpoints.
+        ("POST", "/api/arr/sonarr/test"),
+        ("GET", "/api/arr/sonarr/series"),
+        ("GET", "/api/arr/sonarr/series/{series_id}/episodes"),
     ):
         assert route in checked, route
 

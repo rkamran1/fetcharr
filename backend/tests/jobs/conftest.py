@@ -14,7 +14,7 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
-from app.integrations.arr import ImportPolicy, RadarrClient
+from app.integrations.arr import ImportPolicy, RadarrClient, SonarrClient
 from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.manager import JobManager
 from app.jobs.models import Job, JobLog
@@ -59,8 +59,22 @@ async def radarr() -> AsyncIterator[RadarrClient]:
 
 
 @pytest.fixture
+async def sonarr() -> AsyncIterator[SonarrClient]:
+    client = SonarrClient()
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
+@pytest.fixture
 def make_manager(
-    db: Database, settings: Settings, hub: EventHub, radarr: RadarrClient, secret_key: bytes
+    db: Database,
+    settings: Settings,
+    hub: EventHub,
+    radarr: RadarrClient,
+    sonarr: SonarrClient,
+    secret_key: bytes,
 ) -> Callable[..., JobManager]:
     """A manager whose retries never sleep (§6.1: the wait strategy is injectable)."""
     managers: list[JobManager] = []
@@ -74,6 +88,7 @@ def make_manager(
             overrides.pop("hub", hub),
             SettingsService(chosen_db, chosen_settings, secret_key),
             overrides.pop("radarr", radarr),
+            overrides.pop("sonarr", sonarr),
             download_wait=wait_none(),
             import_policy=overrides.pop("import_policy", TEST_IMPORT_POLICY),
         )
@@ -107,7 +122,9 @@ def new_job(db: Database, settings: Settings) -> Callable[..., Any]:
         created_at: datetime | None = None,
         media_type: str = "other",
         year: int | None = None,
+        numbering: str | None = None,
         radarr_movie_id: int | None = None,
+        sonarr_series_id: int | None = None,
         **fields: Any,
     ) -> str:
         job_id = str(uuid.uuid4())
@@ -122,7 +139,9 @@ def new_job(db: Database, settings: Settings) -> Callable[..., Any]:
                         media_type=media_type,
                         title=title,
                         year=year,
+                        numbering=numbering,
                         radarr_movie_id=radarr_movie_id,
+                        sonarr_series_id=sonarr_series_id,
                         options=chosen.model_dump(),
                         created_at=moment,
                     )
@@ -142,9 +161,9 @@ def new_job(db: Database, settings: Settings) -> Callable[..., Any]:
                     collision_policy=fields.pop("collision_policy", "keep_both"),
                     import_status=fields.pop(
                         "import_status",
-                        ImportStatus.PENDING
-                        if media_type == "movie"
-                        else ImportStatus.NOT_APPLICABLE,
+                        ImportStatus.NOT_APPLICABLE
+                        if media_type == "other"
+                        else ImportStatus.PENDING,
                     ),
                     max_attempts=chosen.retries + 1,
                     job_dir=str(settings.incomplete_dir / job_id),
