@@ -72,8 +72,12 @@ class RadarrMovie:
     id: int
     title: str
     year: int | None
+    #: Radarr only wants a file for the movies it monitors, so "missing" starts here (§5 2a).
+    monitored: bool
     has_file: bool
     quality: str | None
+    #: Radarr's poster, so a list of titles reads as a list of films.
+    poster: str | None
 
 
 class RadarrClient:
@@ -101,10 +105,10 @@ class RadarrClient:
         body = await self._get(connection, "system/status")
         return str(body.get("version") or "unknown")
 
-    async def movies(self, connection: ArrConnection) -> list[RadarrMovie]:
-        """The whole library, cached for five minutes (requirements §5 step 2a)."""
+    async def movies(self, connection: ArrConnection, refresh: bool = False) -> list[RadarrMovie]:
+        """The whole library, cached for five minutes; `refresh` re-reads it now (§5 step 2a)."""
         now = self.clock()
-        if self._movies is not None and now - self._movies[0] < MOVIE_CACHE_TTL_S:
+        if not refresh and self._movies is not None and now - self._movies[0] < MOVIE_CACHE_TTL_S:
             return self._movies[1]
         body = await self._get(connection, "movie")
         movies = [_movie(item) for item in body] if isinstance(body, list) else []
@@ -192,6 +196,19 @@ def _movie(item: dict[str, Any]) -> RadarrMovie:
         id=int(item.get("id", 0)),
         title=str(item.get("title") or ""),
         year=item.get("year") or None,
+        monitored=bool(item.get("monitored")),
         has_file=bool(item.get("hasFile")),
         quality=str(quality) if quality else None,
+        poster=_poster(item),
     )
+
+
+def _poster(item: dict[str, Any]) -> str | None:
+    """Radarr's own poster. `remoteUrl` is absolute and public, so the browser can load it."""
+    for image in item.get("images") or []:
+        if (image or {}).get("coverType") != "poster":
+            continue
+        url = image.get("remoteUrl") or image.get("url")
+        if url:
+            return str(url)
+    return None

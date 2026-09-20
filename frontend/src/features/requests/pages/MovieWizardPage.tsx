@@ -10,6 +10,7 @@ import { InspectCard, inspect } from '@/features/inspections'
 
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
+import MissingMoviePicker from '../components/MissingMoviePicker'
 import RadarrMoviePicker from '../components/RadarrMoviePicker'
 import type { CollisionPolicy, DownloadOptions, MovieMedia, PreviewRequest } from '../types'
 
@@ -26,8 +27,17 @@ function cleanTitle(title: string): string {
     .trim()
 }
 
+/** The two ways into the wizard: URL first (M5b), or the movie first (M5c). */
+type Tab = 'url' | 'missing'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'url', label: 'Paste a URL' },
+  { id: 'missing', label: 'Missing in Radarr' },
+]
+
 export default function MovieWizardPage() {
   const navigate = useNavigate()
+  const [tab, setTab] = useState<Tab>('url')
   const [url, setUrl] = useState('')
   const [media, setMedia] = useState<MovieMedia | null>(null)
   const [collision, setCollision] = useState<CollisionPolicy | null>(null)
@@ -67,33 +77,83 @@ export default function MovieWizardPage() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    setMedia(null)
+    // The URL tab picks its movie after inspecting; the missing tab already has one.
+    if (tab === 'url') setMedia(null)
     setCollision(null)
     inspection.mutate(url.trim())
   }
 
+  /** Nothing half-filled survives a tab change, so a URL can only meet a movie picked here. */
+  const switchTo = (next: Tab) => {
+    setTab(next)
+    setUrl('')
+    setMedia(null)
+    setCollision(null)
+    inspection.reset()
+  }
+
   const mustChoose = preview.data?.exists === true && collision === null
+  // On the missing tab the URL is only asked for once a movie has been chosen.
+  const askForUrl = tab === 'url' || media !== null
 
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold">Download Movie</h1>
-      <form className="flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={submit}>
-        <div className="flex flex-1 flex-col gap-2">
-          <Label htmlFor="url">Video URL</Label>
-          <Input
-            id="url"
-            type="url"
-            inputMode="url"
-            placeholder="https://www.youtube.com/watch?v=…"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            required
-          />
-        </div>
-        <Button type="submit" disabled={inspection.isPending}>
-          Inspect
-        </Button>
-      </form>
+
+      <div role="tablist" aria-label="How to start" className="flex gap-2">
+        {TABS.map(({ id, label }) => (
+          <Button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            variant={tab === id ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => switchTo(id)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
+      {tab === 'missing' && (
+        <Card>
+          <CardContent>
+            <MissingMoviePicker
+              value={media}
+              onChange={(next) => {
+                setMedia(next)
+                setCollision(null)
+                // Un-picking takes the URL form away with it, so nothing is left dangling.
+                if (next === null) {
+                  setUrl('')
+                  inspection.reset()
+                }
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {askForUrl && (
+        <form className="flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={submit}>
+          <div className="flex flex-1 flex-col gap-2">
+            <Label htmlFor="url">Video URL</Label>
+            <Input
+              id="url"
+              type="url"
+              inputMode="url"
+              placeholder="https://www.youtube.com/watch?v=…"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" disabled={inspection.isPending}>
+            Inspect
+          </Button>
+        </form>
+      )}
 
       {!inspection.isIdle && (
         <InspectCard
@@ -106,15 +166,17 @@ export default function MovieWizardPage() {
       {inspection.isSuccess && (
         <Card>
           <CardContent className="flex flex-col gap-4">
-            <RadarrMoviePicker
-              key={inspection.data.inspection_id}
-              initialQuery={cleanTitle(inspection.data.title ?? '')}
-              value={media}
-              onChange={(next) => {
-                setMedia(next)
-                setCollision(null)
-              }}
-            />
+            {tab === 'url' && (
+              <RadarrMoviePicker
+                key={inspection.data.inspection_id}
+                initialQuery={cleanTitle(inspection.data.title ?? '')}
+                value={media}
+                onChange={(next) => {
+                  setMedia(next)
+                  setCollision(null)
+                }}
+              />
+            )}
 
             <DownloadOptionsFields
               value={options}

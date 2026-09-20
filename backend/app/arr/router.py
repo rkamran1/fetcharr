@@ -20,8 +20,13 @@ async def test_radarr(service: Service) -> ArrTestResult:
 
 
 @router.get("/movies", response_model=RadarrMovieList)
-async def list_movies(service: Service, q: Annotated[str, Query()] = "") -> RadarrMovieList:
+async def list_movies(
+    service: Service,
+    q: Annotated[str, Query()] = "",
+    missing: Annotated[bool, Query()] = False,
+    refresh: Annotated[bool, Query()] = False,
+) -> RadarrMovieList:
     try:
-        return await service.movies(q)
+        return await service.movies(q, missing, refresh)
     except ArrDomainError as error:
         raise HTTPException(status_code=error.status, detail=error.detail) from error

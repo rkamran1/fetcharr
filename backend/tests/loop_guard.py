@@ -9,10 +9,21 @@ the Alembic upgrade) happens in a pytest-asyncio fixture-setup task. That is sta
 work, not the app blocking its own loop while serving, and on a slow CI runner it can
 pass 100 ms on its own; those callbacks get a second's grace instead, so a genuinely
 stuck fixture is still caught.
+
+Test bodies get the same treatment on CI, for the same reason. GitHub's runners are
+shared, and a noisy neighbour can stall one for well over 100 ms in the middle of a
+request that does nothing blocking at all. Measured on a developer machine, the slowest
+real test callback in this suite is 35 ms, so the strict budget has no headroom for that
+jitter: two unrelated tests have failed this way, each a few tens of milliseconds over.
+``TEST_BUDGET_S`` therefore relaxes on CI only, and the strict 100 ms still applies on
+every developer machine, which is where blocking code is actually written. The trade-off
+is real and deliberate: a block between 0.1 s and 0.5 s (argon2 on the loop, say) now
+passes CI, and is caught locally instead.
 """
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import Iterator
 
@@ -20,6 +31,13 @@ import pytest
 
 SLOW_CALLBACK_DURATION = 0.1
 FIXTURE_SETUP_BUDGET_S = 1.0
+#: The budget for a test body: strict locally, with room for runner jitter on CI. Set
+#: ``LOOP_GUARD_TEST_BUDGET_S`` to pin it, which is how this guard's own tests stay
+#: deterministic wherever they run.
+TEST_BUDGET_S = float(
+    os.environ.get("LOOP_GUARD_TEST_BUDGET_S")
+    or (0.5 if os.environ.get("CI") else SLOW_CALLBACK_DURATION)
+)
 
 _FIXTURE_TASK = "_asyncgen_fixture_wrapper"
 _TOOK_SECONDS = re.compile(r" took ([0-9.]+) seconds")
@@ -36,11 +54,10 @@ def pytest_asyncio_loop_factories(config: pytest.Config, item: pytest.Item):
 
 
 def _is_failure(message: str) -> bool:
-    """Every slow callback fails, except fixture setup within its larger budget."""
-    if _FIXTURE_TASK not in message:
-        return True
+    """A slow callback fails once it is past its budget; fixture setup gets a larger one."""
+    budget = FIXTURE_SETUP_BUDGET_S if _FIXTURE_TASK in message else TEST_BUDGET_S
     took = _TOOK_SECONDS.search(message)
-    return took is None or float(took.group(1)) > FIXTURE_SETUP_BUDGET_S
+    return took is None or float(took.group(1)) > budget
 
 
 class _SlowCallbackCollector(logging.Handler):

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { radarrMoviesQueryKey, searchRadarrMovies, type RadarrMovie } from '@/features/arr'
 
 import type { MovieMedia } from '../types'
+import MoviePoster from './MoviePoster'
 
 const WARNING =
   "Radarr doesn't have this movie, so the import will fail. Add it in Radarr first " +
@@ -112,39 +113,49 @@ export default function RadarrMoviePicker({ initialQuery, value, onChange }: Pro
       )}
 
       {picked ? (
-        <p className="text-sm">
-          <span className="font-medium">
-            {picked.title}
-            {picked.year ? ` (${picked.year})` : ''}
-          </span>
-          {picked.has_file && (
-            <span className="text-muted-foreground">
-              {' '}
-              — Radarr already has this at {picked.quality ?? 'an unknown quality'}
+        <div className="flex items-start gap-4">
+          <MoviePoster url={picked.poster} className="w-20" />
+          <p className="text-sm">
+            <span className="font-medium">
+              {picked.title}
+              {picked.year ? ` (${picked.year})` : ''}
             </span>
-          )}
-        </p>
+            {picked.has_file && (
+              <span className="text-muted-foreground">
+                {' '}
+                — Radarr already has this at {picked.quality ?? 'an unknown quality'}
+              </span>
+            )}
+          </p>
+        </div>
       ) : (
-        movies.isSuccess && (
-          <ul aria-label="Radarr movies" className="flex flex-col gap-1">
+        movies.isSuccess &&
+        (movies.data.movies.length === 0 ? (
+          <p className="text-muted-foreground text-sm">Nothing in Radarr matches.</p>
+        ) : (
+          // The same poster grid as the Missing tab, so the two ways in look like one app.
+          <ul
+            aria-label="Radarr movies"
+            className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+          >
             {movies.data.movies.map((movie) => (
               <li key={movie.id}>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   onClick={() => choose(movie)}
+                  className="h-auto w-full flex-col items-stretch gap-0 overflow-hidden p-0 text-left"
                 >
-                  {movie.title}
-                  {movie.year ? ` (${movie.year})` : ''}
+                  <MoviePoster url={movie.poster} className="w-full rounded-none" />
+                  <span className="w-full px-2 py-2 text-xs leading-snug whitespace-normal">
+                    {movie.title}
+                    {movie.year ? ` (${movie.year})` : ''}
+                  </span>
                 </Button>
               </li>
             ))}
-            {movies.data.movies.length === 0 && (
-              <li className="text-muted-foreground text-sm">Nothing in Radarr matches.</li>
-            )}
           </ul>
-        )
+        ))
       )}
 
       <Button

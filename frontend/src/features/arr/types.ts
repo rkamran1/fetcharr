@@ -2,8 +2,11 @@ export type RadarrMovie = {
   id: number
   title: string
   year: number | null
+  monitored: boolean
   has_file: boolean
   quality: string | null
+  /** Radarr's poster, absolute and public, so the browser can load it directly. */
+  poster: string | null
 }
 
 export type RadarrMovieList = { movies: RadarrMovie[] }
