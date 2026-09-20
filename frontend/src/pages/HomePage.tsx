@@ -1,14 +1,43 @@
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Link } from 'react-router'
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function HomePage() {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          <h1 className="text-xl">Home</h1>
-        </CardTitle>
-        <CardDescription>Downloads will appear here in a later version.</CardDescription>
-      </CardHeader>
-    </Card>
+    <div className="flex flex-col gap-4">
+      <h1 className="text-xl font-semibold">Home</h1>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Link to="/download/other" className="rounded-xl focus-visible:ring-2">
+          <Card className="h-full transition-colors hover:border-primary">
+            <CardHeader>
+              <CardTitle>
+                <h2 className="text-lg">Other</h2>
+              </CardTitle>
+              <CardDescription>
+                Any video, straight into <code>completed/other</code>. No Radarr or Sonarr.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+        <Card className="h-full opacity-60">
+          <CardHeader>
+            <CardTitle>
+              <h2 className="text-lg">Movie</h2>
+            </CardTitle>
+            <CardDescription>Coming with Radarr import.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-sm">Not available yet.</CardContent>
+        </Card>
+        <Card className="h-full opacity-60">
+          <CardHeader>
+            <CardTitle>
+              <h2 className="text-lg">TV Show</h2>
+            </CardTitle>
+            <CardDescription>Coming with Sonarr import.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-sm">Not available yet.</CardContent>
+        </Card>
+      </div>
+    </div>
   )
 }

@@ -48,6 +48,21 @@ async def test_every_non_public_api_route_requires_auth(
     assert ("GET", "/api/auth/me") in checked
     assert ("POST", "/api/auth/api-key") in checked
     assert ("GET", "/api/{path:path}") in checked
+    # M5a's endpoints, named so a router that stops being included is noticed.
+    for route in (
+        ("POST", "/api/requests"),
+        ("GET", "/api/requests/{request_id}"),
+        ("POST", "/api/preview"),
+        ("GET", "/api/jobs"),
+        ("GET", "/api/jobs/{job_id}"),
+        ("GET", "/api/jobs/{job_id}/log"),
+        ("POST", "/api/jobs/{job_id}/cancel"),
+        ("POST", "/api/jobs/{job_id}/retry"),
+        ("DELETE", "/api/jobs/{job_id}"),
+        ("GET", "/api/events"),
+        ("GET", "/api/system/status"),
+    ):
+        assert route in checked, route
 
 
 def test_public_routes_are_the_expected_set(app: FastAPI) -> None:

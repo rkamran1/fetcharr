@@ -2,14 +2,20 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
 
-import { ApiError, getAuthState, getMe } from '@/api/client'
+import { ApiError } from '@/api/client'
 import AppShell from '@/components/AppShell'
-import { authStateQueryKey, meQueryKey } from '@/lib/queryClient'
+import {
+  authStateQueryKey,
+  getAuthState,
+  getMe,
+  LoginPage,
+  meQueryKey,
+  SetupPage,
+} from '@/features/auth'
+import { QueuePage } from '@/features/jobs'
+import { OtherWizardPage } from '@/features/requests'
+import { SettingsPage } from '@/features/settings'
 import HomePage from '@/pages/HomePage'
-import InspectPage from '@/pages/InspectPage'
-import LoginPage from '@/pages/LoginPage'
-import SettingsPage from '@/pages/SettingsPage'
-import SetupPage from '@/pages/SetupPage'
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -51,7 +57,8 @@ export default function App() {
         }
       >
         <Route index element={<HomePage />} />
-        <Route path="inspect" element={<InspectPage />} />
+        <Route path="download/other" element={<OtherWizardPage />} />
+        <Route path="queue" element={<QueuePage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

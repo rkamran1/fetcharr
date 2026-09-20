@@ -36,6 +36,45 @@ export function sentBodies(fetchMock: ReturnType<typeof mockApi>, key: string): 
     .map(([, init]) => (init?.body ? JSON.parse(String(init.body)) : undefined))
 }
 
+/** A stand-in for the browser's EventSource that tests push server events into. */
+export class FakeEventSource {
+  static last: FakeEventSource | undefined
+  readonly url: string
+  closed = false
+  private listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>()
+
+  constructor(url: string) {
+    this.url = url
+    FakeEventSource.last = this
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    const set = this.listeners.get(type) ?? new Set()
+    set.add(listener)
+    this.listeners.set(type, set)
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    this.listeners.get(type)?.delete(listener)
+  }
+
+  close(): void {
+    this.closed = true
+  }
+
+  /** Deliver one server-sent event to the page. */
+  emit(type: string, data: unknown): void {
+    const event = new MessageEvent<string>(type, { data: JSON.stringify(data) })
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  }
+}
+
+export function mockEventSource(): typeof FakeEventSource {
+  FakeEventSource.last = undefined
+  vi.stubGlobal('EventSource', FakeEventSource)
+  return FakeEventSource
+}
+
 export function renderApp(path: string) {
   return render(
     <QueryClientProvider client={createQueryClient()}>

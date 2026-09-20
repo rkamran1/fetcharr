@@ -17,6 +17,7 @@ frontend/dist/
 
 # runtime data and media
 config/
+.local/
 *.db
 *.db-*
 *.mp4

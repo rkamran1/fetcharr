@@ -29,7 +29,8 @@ def test_normalise_youtube() -> None:
     assert {"lang": None, "codec": "mp4a", "abr": 129} in info["audio_tracks"]
     assert {"lang": None, "codec": "opus", "abr": 129} in info["audio_tracks"]
     assert info["has_hdr"] is False
-    # Largest 2160p video (VP9 315) plus the largest audio-only format (m4a 140).
+    # Largest 2160p video (VP9 315) plus the largest audio-only format (m4a 140). A
+    # reported size always wins over a bitrate estimate (M5a).
     assert info["estimated_sizes"]["2160"] == 1362269481 + 10271496
     assert list(info["estimated_sizes"]) == [str(h) for h in info["video_heights"]]
     assert info["stream_type"] == "dash"
@@ -50,9 +51,10 @@ def test_normalise_dailymotion_is_hls_with_four_fragments() -> None:
     assert info["stream_type"] == "hls"
     assert info["auto"] == {"fragments": 4, "use_aria2c": False}
     assert info["video_heights"] == [576, 480, 384]
-    # Muxed HLS formats: the audio comes from them, and no sizes are known.
+    # Muxed HLS formats: the audio comes from them, and none reports a filesize, so the
+    # sizes are estimated from the bitrate over the 106 s running time (M5a).
     assert info["audio_tracks"] == [{"lang": None, "codec": "mp4a", "abr": None}]
-    assert info["estimated_sizes"] == {}
+    assert info["estimated_sizes"] == {"576": 28_477_960, "480": 11_080_710, "384": 6_102_420}
 
 
 def test_normalise_bilibili_is_http() -> None:
@@ -69,3 +71,28 @@ def test_normalise_rejects_playlist() -> None:
         normalise(_fixture("playlist.json"), aria2c_available=False)
 
     assert (caught.value.status, caught.value.detail) == (422, PLAYLIST_MESSAGE)
+
+
+def test_normalise_estimates_a_size_from_the_bitrate() -> None:
+    """Formats with no filesize still get a size, so every height shows one (M5a)."""
+    info = normalise(
+        {
+            "id": "x",
+            "title": "x",
+            "duration": 100,
+            "formats": [
+                {"height": 720, "vcodec": "avc1", "acodec": "none", "tbr": 800},
+                {"height": 360, "vcodec": "avc1", "acodec": "none", "tbr": 400, "filesize": 1000},
+                {"height": 240, "vcodec": "avc1", "acodec": "none"},
+                {"vcodec": "none", "acodec": "mp4a", "tbr": 128},
+            ],
+        },
+        aria2c_available=False,
+    )
+
+    # 800 kbit/s video + 128 kbit/s audio over 100 s.
+    assert info["estimated_sizes"]["720"] == 800 * 1000 // 8 * 100 + 128 * 1000 // 8 * 100
+    # A reported filesize is used as it stands, plus the largest known audio size.
+    assert info["estimated_sizes"]["360"] == 1000
+    # Neither a size nor a bitrate: no guess at all.
+    assert "240" not in info["estimated_sizes"]

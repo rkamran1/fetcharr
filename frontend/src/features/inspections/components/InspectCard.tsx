@@ -1,6 +1,8 @@
-import { ApiError, type InspectResult } from '@/api/client'
+import { ApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+
+import type { InspectResult } from '../types'
 
 type Props = {
   isPending: boolean
