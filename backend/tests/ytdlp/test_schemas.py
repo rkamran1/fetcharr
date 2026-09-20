@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.ytdlp.options import DownloadOptions
+from app.ytdlp.schemas import DownloadOptions
 
 
 def test_defaults() -> None:

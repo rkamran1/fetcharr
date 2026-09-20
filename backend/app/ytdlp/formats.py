@@ -1,6 +1,6 @@
 """Port of `get_format_selector` from download_video.sh."""
 
-from app.ytdlp.options import Container, Quality
+from app.ytdlp.schemas import Container, Quality
 
 _HEIGHTS: dict[Quality, int | None] = {
     "144p": 144,

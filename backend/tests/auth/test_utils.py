@@ -3,8 +3,8 @@ import time
 import pytest
 from argon2 import PasswordHasher
 
-from app.auth import passwords
-from app.auth.passwords import hash_password, verify_password
+from app.auth import utils
+from app.auth.utils import hash_password, verify_password
 
 
 class _SlowHasher(PasswordHasher):
@@ -20,7 +20,7 @@ class _SlowHasher(PasswordHasher):
 
 
 async def test_hash_and_verify_run_off_the_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(passwords, "_hasher", _SlowHasher())
+    monkeypatch.setattr(utils, "_hasher", _SlowHasher())
 
     password_hash = await hash_password("correct horse battery")
 

@@ -6,19 +6,13 @@ API-key requests are exempt.
 """
 
 from dataclasses import dataclass
+from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import HTTPException, Request, Response
-from sqlalchemy import update
+from fastapi import Depends, HTTPException, Request, Response
 
-from app.auth.passwords import token_matches
-from app.auth.sessions import (
-    COOKIE_NAME,
-    SESSION_LIFETIME,
-    needs_slide,
-    set_session_cookie,
-)
-from app.db.models import Account, AuthSession, utcnow
+from app.auth.service import AuthService
+from app.auth.utils import COOKIE_NAME, needs_slide, set_session_cookie
 
 STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -26,6 +20,10 @@ STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 @dataclass(frozen=True)
 class Auth:
     session_id: str | None  # None when authenticated with the API key
+
+
+def get_auth_service(request: Request) -> AuthService:
+    return AuthService(request.app.state.db, request.app.state.login_limiter)
 
 
 def _unauthorized() -> HTTPException:
@@ -47,30 +45,25 @@ async def check_origin(request: Request) -> None:
         _verify_origin(request)
 
 
-async def require_auth(request: Request, response: Response) -> Auth:
-    db = request.app.state.db
+async def require_auth(
+    request: Request,
+    response: Response,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> Auth:
     api_key = request.headers.get("x-api-key")
     if api_key is not None:
-        async with db.read_session() as session:
-            account = await session.get(Account, 1)
-        if account is None or not token_matches(api_key, account.api_key_hash):
+        if not await service.api_key_valid(api_key):
             raise _unauthorized()
         return Auth(session_id=None)
 
     session_id = request.cookies.get(COOKIE_NAME)
     if not session_id:
         raise _unauthorized()
-    async with db.read_session() as session:
-        auth_session = await session.get(AuthSession, session_id)
-    if auth_session is None or auth_session.expires_at <= utcnow():
+    auth_session = await service.valid_session(session_id)
+    if auth_session is None:
         raise _unauthorized()
     _verify_origin(request)
-    if needs_slide(auth_session):
-        async with db.write_session() as session:
-            await session.execute(
-                update(AuthSession)
-                .where(AuthSession.id == session_id)
-                .values(expires_at=utcnow() + SESSION_LIFETIME)
-            )
+    if needs_slide(auth_session.expires_at):
+        await service.slide_session(session_id)
         set_session_cookie(response, session_id, secure=request.app.state.settings.cookie_secure)
     return Auth(session_id=session_id)

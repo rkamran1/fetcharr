@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import RouteContext, iter_route_contexts
 
-from app.auth.deps import require_auth
+from app.auth.dependencies import require_auth
 
 PUBLIC_ROUTES = {
     ("GET", "/api/auth/state"),
