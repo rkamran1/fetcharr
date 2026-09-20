@@ -94,7 +94,9 @@ async def test_the_movie_list_is_cached_per_client(client: RadarrClient) -> None
     client.clock = lambda: now[0]
     async with respx.mock(base_url=RADARR_URL) as mock:
         route = mock.get("/api/v3/movie").mock(
-            return_value=httpx.Response(200, json=[{"id": 1, "title": "Sintel", "year": 2010}])
+            return_value=httpx.Response(
+                200, json=[{"id": 1, "title": "Sintel", "year": 2010, "monitored": True}]
+            )
         )
 
         first = await client.movies(CONNECTION)
@@ -102,9 +104,11 @@ async def test_the_movie_list_is_cached_per_client(client: RadarrClient) -> None
 
     assert route.call_count == 1
     assert first == second
-    assert (first[0].id, first[0].title, first[0].has_file, first[0].quality) == (
-        1,
-        "Sintel",
-        False,
-        None,
-    )
+    assert (
+        first[0].id,
+        first[0].title,
+        first[0].monitored,
+        first[0].has_file,
+        first[0].quality,
+        first[0].poster,
+    ) == (1, "Sintel", True, False, None, None)

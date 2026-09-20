@@ -138,17 +138,57 @@ def test_secret_and_radarr_settings_documented(repo_root: Path) -> None:
     assert "SECRET_KEY_FILE=/config/secret.key" in compose
 
 
+def _dev_compose(repo_root: Path) -> dict:
+    return yaml.safe_load((repo_root / "docker-compose.dev.yml").read_text())
+
+
+def _mounts(service: dict) -> dict[str, str]:
+    return {volume.split(":")[1]: volume.split(":")[0] for volume in service["volumes"]}
+
+
+def _environment(service: dict) -> dict[str, str]:
+    return dict(entry.split("=", 1) for entry in service["environment"])
+
+
 def test_dev_compose_mounts_the_downloads_directory(repo_root: Path) -> None:
-    compose = yaml.safe_load((repo_root / "docker-compose.dev.yml").read_text())
-    mounts = dict(
-        (volume.split(":")[1], volume.split(":")[0])
-        for volume in compose["services"]["backend"]["volumes"]
-    )
+    compose = _dev_compose(repo_root)
 
     # Without it the dev container has nowhere to put downloads (§7.6), and a host
     # folder rather than a named volume keeps finished files openable.
-    assert mounts["/web-downloads"] == "./.local/web-downloads"
+    assert _mounts(compose["services"]["backend"])["/web-downloads"] == "./.local/web-downloads"
     assert "fetcharr-dev-downloads" not in compose.get("volumes", {})
+
+
+def test_dev_compose_runs_the_arr_apps_on_one_shared_path(repo_root: Path) -> None:
+    """The dev stack's whole point: one folder that means the same thing everywhere (M5c AC8)."""
+    services = _dev_compose(repo_root)["services"]
+
+    # A Move import is only a rename when fetcharr and the arr apps agree on the path (§7.1).
+    shared = {
+        name: _mounts(services[name])["/web-downloads"] for name in ("backend", "radarr", "sonarr")
+    }
+    assert set(shared.values()) == {"./.local/web-downloads"}, shared
+
+    # The API keys are seeded, so a fresh volume needs no key copied out of the arr UI.
+    key = "${DEV_RADARR_API_KEY:-0123456789abcdef0123456789abcdef}"
+    assert _environment(services["radarr"])["RADARR__AUTH__APIKEY"] == key
+    assert _environment(services["sonarr"])["SONARR__AUTH__APIKEY"].startswith(
+        "${DEV_SONARR_API_KEY:-"
+    )
+
+    # And fetcharr is pointed at the throwaway Radarr with that same key (§7.5).
+    backend = _environment(services["backend"])
+    assert backend["RADARR_URL"] == "http://radarr:7878"
+    assert backend["RADARR_API_KEY"] == key
+
+    # One uid/gid/umask across all three, or an arr app can't delete what fetcharr wrote (§7.6).
+    for name in ("backend", "radarr", "sonarr"):
+        environment = _environment(services[name])
+        assert (environment["PUID"], environment["PGID"], environment["UMASK"]) == (
+            "1000",
+            "1000",
+            "002",
+        ), name
 
 
 def test_entrypoint_prepares_the_download_folders(repo_root: Path) -> None:

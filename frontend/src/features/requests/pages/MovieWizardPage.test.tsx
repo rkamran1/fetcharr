@@ -35,8 +35,48 @@ const result: InspectResult = {
 
 const MOVIES = {
   movies: [
-    { id: 7, title: 'Big Buck Bunny', year: 2008, has_file: false, quality: null },
-    { id: 11, title: 'The Big Lebowski', year: 1998, has_file: false, quality: null },
+    {
+      id: 7,
+      title: 'Big Buck Bunny',
+      year: 2008,
+      monitored: true,
+      has_file: false,
+      quality: null,
+      poster: 'https://image.tmdb.org/bbb.jpg',
+    },
+    {
+      id: 11,
+      title: 'The Big Lebowski',
+      year: 1998,
+      monitored: true,
+      has_file: false,
+      quality: null,
+      poster: null,
+    },
+  ],
+}
+
+const MISSING = {
+  movies: [
+    {
+      id: 9,
+      title: 'Sintel',
+      year: 2010,
+      monitored: true,
+      has_file: false,
+      quality: null,
+      poster: 'https://image.tmdb.org/sintel.jpg',
+    },
+    // No poster in Radarr: the row still has to render.
+    {
+      id: 13,
+      title: 'Big Fish',
+      year: 2003,
+      monitored: true,
+      has_file: false,
+      quality: null,
+      poster: null,
+    },
   ],
 }
 
@@ -56,6 +96,7 @@ function mockWizard(overrides: Record<string, () => Response> = {}) {
     ...base,
     'POST /api/inspect': () => json(result),
     'GET /api/arr/radarr/movies?q=Big%20Buck%20Bunny': () => json(MOVIES),
+    'GET /api/arr/radarr/movies?q=&missing=true': () => json(MISSING),
     'POST /api/preview': () => json({ path: PATH, exists: false }),
     'POST /api/requests': () => json({ id: 'r1', jobs: ['j1'] }, 201),
     'GET /api/jobs': () => json({ jobs: [] }),
@@ -70,6 +111,11 @@ async function inspectUrl() {
 
 async function pick(name: string) {
   const list = await screen.findByRole('list', { name: 'Radarr movies' })
+  fireEvent.click(within(list).getByRole('button', { name }))
+}
+
+async function pickMissing(name: string) {
+  const list = await screen.findByRole('list', { name: 'Missing movies' })
   fireEvent.click(within(list).getByRole('button', { name }))
 }
 
@@ -111,7 +157,15 @@ describe('Movie wizard', () => {
       'GET /api/arr/radarr/movies?q=Big%20Buck%20Bunny': () =>
         json({
           movies: [
-            { id: 7, title: 'Big Buck Bunny', year: 2008, has_file: true, quality: 'WEBDL-720p' },
+            {
+              id: 7,
+              title: 'Big Buck Bunny',
+              year: 2008,
+              monitored: true,
+              has_file: true,
+              quality: 'WEBDL-720p',
+              poster: null,
+            },
           ],
         }),
     })
@@ -199,6 +253,141 @@ describe('Movie wizard', () => {
     expect(await screen.findByText(/pick the movie first/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
     expect(sentBodies(fetchMock, 'POST /api/preview')).toEqual([])
+  })
+
+  it('opens on Paste a URL', async () => {
+    mockWizard()
+    renderApp('/download/movie')
+
+    // The M5b way in is still the default, so nothing an existing owner does changes.
+    expect(await screen.findByRole('tab', { name: 'Paste a URL' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getByRole('tab', { name: 'Missing in Radarr' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    expect(screen.getByLabelText('Video URL')).toBeInTheDocument()
+  })
+
+  it("lists the movies Radarr is missing and downloads one against Radarr's own title", async () => {
+    const fetchMock = mockWizard()
+    mockEventSource()
+    renderApp('/download/movie')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Missing in Radarr' }))
+
+    const list = await screen.findByRole('list', { name: 'Missing movies' })
+    expect(within(list).getByRole('button', { name: 'Big Fish (2003)' })).toBeInTheDocument()
+    // Radarr's poster, decorative so it stays out of the button's accessible name (AC11).
+    const poster = within(list).getByRole('presentation', { hidden: true })
+    expect(poster).toHaveAttribute('src', 'https://image.tmdb.org/sintel.jpg')
+    // The URL is only asked for once a movie has been picked.
+    expect(screen.queryByLabelText('Video URL')).not.toBeInTheDocument()
+
+    await pickMissing('Sintel (2010)')
+
+    // The poster stays with the movie once picked, beside the URL form (AC11).
+    expect(screen.getByRole('presentation', { hidden: true })).toHaveAttribute(
+      'src',
+      'https://image.tmdb.org/sintel.jpg',
+    )
+
+    await inspectUrl()
+
+    expect(await screen.findByText(PATH)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    expect(await screen.findByRole('heading', { name: 'Queue' })).toBeInTheDocument()
+    // Radarr's own id, title and year, exactly as the URL-first tab sends them.
+    expect(sentBodies(fetchMock, 'POST /api/requests')).toEqual([
+      {
+        media_type: 'movie',
+        media: { radarr_movie_id: 9, title: 'Sintel', year: 2010 },
+        items: [{ inspection_id: 7 }],
+        options: OPTIONS,
+        collision_policy: 'keep_both',
+      },
+    ])
+    expect(sentBodies(fetchMock, 'POST /api/preview')).toContainEqual({
+      media_type: 'movie',
+      media: { radarr_movie_id: 9, title: 'Sintel', year: 2010 },
+      inspection_id: 7,
+      options: OPTIONS,
+    })
+  })
+
+  it('clears the picked movie when the tab changes', async () => {
+    const fetchMock = mockWizard()
+    renderApp('/download/movie')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Missing in Radarr' }))
+    await pickMissing('Sintel (2010)')
+    expect(await screen.findByLabelText('Video URL')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Paste a URL' }))
+    await inspectUrl()
+
+    // Sintel didn't come along, so nothing is previewed and nothing can be sent.
+    expect(await screen.findByText(/pick the movie first/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled()
+    expect(sentBodies(fetchMock, 'POST /api/preview')).toEqual([])
+  })
+
+  it('refreshes the missing list straight from Radarr', async () => {
+    const refreshed = {
+      movies: [
+        {
+          id: 21,
+          title: 'Tears of Steel',
+          year: 2012,
+          monitored: true,
+          has_file: false,
+          quality: null,
+          poster: null,
+        },
+      ],
+    }
+    const fetchMock = mockWizard({
+      'GET /api/arr/radarr/movies?q=&missing=true&refresh=true': () => json(refreshed),
+    })
+    renderApp('/download/movie')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Missing in Radarr' }))
+    await screen.findByRole('button', { name: 'Sintel (2010)' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    // Radarr's library is cached for five minutes; Refresh is the way past it.
+    expect(await screen.findByRole('button', { name: 'Tears of Steel (2012)' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sintel (2010)' })).not.toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.filter(
+        ([input]) => String(input) === '/api/arr/radarr/movies?q=&missing=true&refresh=true',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('shows Radarr posters in the Paste a URL tab too', async () => {
+    mockWizard()
+    renderApp('/download/movie')
+
+    await inspectUrl()
+
+    const list = await screen.findByRole('list', { name: 'Radarr movies' })
+    // Same decorative poster treatment as the Missing tab, so the two ways in match.
+    const posters = within(list).getAllByRole('presentation', { hidden: true })
+    expect(posters[0]).toHaveAttribute('src', 'https://image.tmdb.org/bbb.jpg')
+    // The poster must stay out of the accessible name, or picking by title breaks.
+    expect(within(list).getByRole('button', { name: 'Big Buck Bunny (2008)' })).toBeInTheDocument()
+
+    await pick('Big Buck Bunny (2008)')
+
+    expect(screen.getByRole('presentation', { hidden: true })).toHaveAttribute(
+      'src',
+      'https://image.tmdb.org/bbb.jpg',
+    )
   })
 
   it('is reachable from Home', async () => {

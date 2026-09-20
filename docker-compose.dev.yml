@@ -1,5 +1,10 @@
-# Local development on the Mac: backend with uvicorn --reload, frontend with the Vite dev server.
+# Local development on the Mac: backend with uvicorn --reload, frontend with the Vite dev server,
+# and a throwaway Radarr/Sonarr to test the import against without touching the homelab.
 # Open http://localhost:8686. Usage: docker compose -f docker-compose.dev.yml up --build
+#
+# The one thing this stack exists to get right: backend, radarr and sonarr all mount the SAME
+# host folder at the SAME container path (/web-downloads), so the path fetcharr hands Radarr in
+# a DownloadedMoviesScan means the same file to Radarr, and "Move" is a rename (§7.1, §7.5).
 services:
   backend:
     build: .
@@ -7,6 +12,11 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      # The same ids and umask as the arr services, so each can delete the other's files (§7.6).
+      - UMASK=002
+      # Pointed at the throwaway Radarr below. Set here, these win over Settings (§7.5).
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=${DEV_RADARR_API_KEY:-0123456789abcdef0123456789abcdef}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
     volumes:
       - ./backend/app:/app/app
@@ -30,5 +40,43 @@ services:
     depends_on:
       - backend
 
+  # Throwaway Radarr for testing the movie flow end to end. Its library lives in the same
+  # host folder, so an import is a rename rather than a copy across filesystems.
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=${TZ:-Asia/Karachi}
+      # Seeded, so fetcharr can talk to Radarr on a fresh volume with no copying keys by hand.
+      - RADARR__AUTH__APIKEY=${DEV_RADARR_API_KEY:-0123456789abcdef0123456789abcdef}
+      # A dev box on localhost; skip the login screen rather than invent a password.
+      - RADARR__AUTH__METHOD=External
+    volumes:
+      - radarr-dev-config:/config
+      - ./.local/web-downloads:/web-downloads   # the same folder, at the same path
+    ports:
+      - "7878:7878"
+
+  # Sonarr is here so the TV flow has somewhere to go in M6. fetcharr has no Sonarr client
+  # yet, so nothing talks to it today: it shares the volume and waits.
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=${TZ:-Asia/Karachi}
+      - SONARR__AUTH__APIKEY=${DEV_SONARR_API_KEY:-fedcba9876543210fedcba9876543210}
+      - SONARR__AUTH__METHOD=External
+    volumes:
+      - sonarr-dev-config:/config
+      - ./.local/web-downloads:/web-downloads   # the same folder, at the same path
+    ports:
+      - "8989:8989"
+
 volumes:
   fetcharr-dev-config:
+  radarr-dev-config:
+  sonarr-dev-config:

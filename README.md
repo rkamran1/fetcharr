@@ -71,6 +71,66 @@ docker compose -f docker-compose.dev.yml up --build
 
 The dev stack writes downloads to `./.local/web-downloads` (git-ignored), so finished files land in `./.local/web-downloads/completed/other/`.
 
+### Testing the Radarr import locally
+
+`docker-compose.dev.yml` also runs a throwaway **Radarr** (http://localhost:7878) and **Sonarr** (http://localhost:8989), so the import can be tested without deploying to a homelab. All three containers mount `./.local/web-downloads` at `/web-downloads`, which is the point: the path fetcharr hands Radarr in a `DownloadedMoviesScan` means the same file inside Radarr, so `Move` is a rename rather than a copy (§7.1, §7.5).
+
+Their API keys are seeded from the compose file, so fetcharr can reach Radarr on a fresh volume with nothing copied by hand. Override them (and `TZ`) with a `.env` beside the compose file if you like:
+
+```bash
+DEV_RADARR_API_KEY=0123456789abcdef0123456789abcdef   # the default, shown
+DEV_SONARR_API_KEY=fedcba9876543210fedcba9876543210   # the default, shown
+```
+
+Both arr apps run with `AUTH__METHOD=External`, i.e. no login screen. That is fine for a container bound to localhost and is **not** how to run them anywhere else.
+
+#### Library folders and the one-time arr setup
+
+Radarr imports *out of* `completed/` and *into* its own root folder, and fetcharr never writes into that root folder (§7.1). The root folder therefore has to be a different directory on the **same mount**, or the `Move` becomes a copy + delete. In this stack that is `/web-downloads/library/`, a sibling of `completed/` and `incomplete/`:
+
+```
+.local/web-downloads/
+├── incomplete/          fetcharr works here
+├── completed/           fetcharr writes finished files here
+│   ├── movies/            → Radarr imports FROM here
+│   ├── tv-shows/          → Sonarr imports FROM here
+│   └── other/
+└── library/             → the arr apps import INTO here (fetcharr never touches it)
+    ├── movies/
+    └── tv-shows/
+```
+
+`.local/` is git-ignored, so after a fresh clone or a `docker compose down -v` run this once:
+
+```bash
+RK=0123456789abcdef0123456789abcdef   # DEV_RADARR_API_KEY
+SK=fedcba9876543210fedcba9876543210   # DEV_SONARR_API_KEY
+
+mkdir -p .local/web-downloads/library/movies .local/web-downloads/library/tv-shows
+
+curl -s -X POST http://localhost:7878/api/v3/rootfolder -H "X-Api-Key: $RK" \
+  -H 'Content-Type: application/json' -d '{"path":"/web-downloads/library/movies"}'
+curl -s -X POST http://localhost:8989/api/v3/rootfolder -H "X-Api-Key: $SK" \
+  -H 'Content-Type: application/json' -d '{"path":"/web-downloads/library/tv-shows"}'
+```
+
+Then give Radarr a movie to be missing. Radarr only knows TMDB titles, so look one up and add it monitored, **without** searching for a release:
+
+```bash
+curl -s -H "X-Api-Key: $RK" "http://localhost:7878/api/v3/movie/lookup?term=Big+Buck+Bunny"
+curl -s -X POST http://localhost:7878/api/v3/movie -H "X-Api-Key: $RK" \
+  -H 'Content-Type: application/json' -d '{
+    "tmdbId": 10378, "title": "Big Buck Bunny", "year": 2008,
+    "qualityProfileId": 4, "rootFolderPath": "/web-downloads/library/movies",
+    "monitored": true, "minimumAvailability": "released",
+    "addOptions": {"searchForMovie": false}
+  }'
+```
+
+Monitored with no file is exactly what "missing" means, so it now shows up in fetcharr under **Download Movie → Missing in Radarr**. Pick it, paste a URL, and the job should reach `imported` with the file under `library/movies/`.
+
+fetcharr has no Sonarr client yet, so Sonarr just holds a root folder on the shared volume until M6.
+
 `VITE_PROXY_TARGET` (dev only, default `http://localhost:8000`) sets where the Vite dev server proxies `/healthz` and `/api`.
 
 The image targets `linux/amd64` only. On Apple Silicon always build with `docker buildx build --platform linux/amd64 -t fetcharr:dev --load .`, then check it with `scripts/test-image.sh fetcharr:dev`.

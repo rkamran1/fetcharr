@@ -15,8 +15,10 @@ class RadarrMovieRead(BaseModel):
     id: int
     title: str
     year: int | None
+    monitored: bool
     has_file: bool
     quality: str | None
+    poster: str | None
 
 
 class RadarrMovieList(BaseModel):

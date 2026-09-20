@@ -29,16 +29,24 @@ class ArrService:
             return ArrTestResult(ok=False, error=f"{connection.url} is unreachable: {error}")
         return ArrTestResult(ok=True, version=version)
 
-    async def movies(self, query: str = "") -> RadarrMovieList:
+    async def movies(
+        self, query: str = "", missing: bool = False, refresh: bool = False
+    ) -> RadarrMovieList:
+        """`missing` is what Radarr's Wanted view means: monitored, and still without a file.
+
+        `refresh` skips the five-minute cache, for the picker's Refresh button.
+        """
         connection = await self.settings.radarr()
         if connection is None:
             raise RadarrNotConfigured
         try:
-            movies = await self.client.movies(connection)
+            movies = await self.client.movies(connection, refresh=refresh)
         except ArrError as error:
             raise RadarrUnavailable(str(error)) from error
         except httpx.HTTPError as error:
             raise RadarrUnavailable(f"{connection.url} is unreachable: {error}") from error
+        if missing:
+            movies = [movie for movie in movies if movie.monitored and not movie.has_file]
         wanted = query.strip().casefold()
         matches = [movie for movie in movies if wanted in movie.title.casefold()]
         return RadarrMovieList(movies=[_read(movie) for movie in matches[:MOVIE_LIMIT]])
@@ -49,6 +57,8 @@ def _read(movie: RadarrMovie) -> RadarrMovieRead:
         id=movie.id,
         title=movie.title,
         year=movie.year,
+        monitored=movie.monitored,
         has_file=movie.has_file,
         quality=movie.quality,
+        poster=movie.poster,
     )
