@@ -40,6 +40,10 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `INCOMPLETE_DIR` | `/web-downloads/incomplete` | app | per-job work folders; replaced files go to `_replaced/`. Keep it on the same volume as `COMPLETED_DIR`. |
 | `MAX_CONCURRENT_DOWNLOADS` | `2` | app | how many downloads run at once. The slot is held only while yt-dlp runs. |
 | `AUTO_RESUME` | `true` | app | after a restart, resume jobs from their last completed step. `false` marks them failed instead, to be retried by hand. |
+| `SECRET_KEY` | unset | app | the Fernet key that encrypts secrets at rest (arr API keys, later cookies). Unset, fetcharr generates `SECRET_KEY_FILE` on first start. |
+| `SECRET_KEY_FILE` | `/config/secret.key` | app | where that key is read from, and written (mode `0600`) when it doesn't exist yet. Keep `/config` backed up: a lost key means re-entering every stored secret. |
+| `RADARR_URL` | unset | app | Radarr's base URL, e.g. `http://radarr:7878`. Set here it overrides what Settings holds. |
+| `RADARR_API_KEY` | unset | app | Radarr's API key. Set here it overrides what Settings holds and is never written to the database. |
 | `APP_VERSION` | `dev` | app | version shown in the UI and `/healthz`. Set by the image build (`--build-arg APP_VERSION=…`). |
 
 ## Development

@@ -8,6 +8,7 @@ import { formatBytes } from '@/lib/format'
 
 import { cancelJob, jobsQueryKey, retryJob } from '../api'
 import type { Job, JobStatus } from '../types'
+import ImportBadge from './ImportBadge'
 import LogDrawer from './LogDrawer'
 
 const PHASE_LABEL: Record<JobStatus, string> = {
@@ -105,6 +106,7 @@ export default function JobCard({ job }: { job: Job }) {
         {job.completed_path && (
           <p className="text-muted-foreground text-xs break-all">{job.completed_path}</p>
         )}
+        <ImportBadge job={job} />
         <div className="flex flex-wrap gap-2">
           {CANCELLABLE.includes(job.status) && (
             <Button

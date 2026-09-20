@@ -19,15 +19,18 @@ export default function HomePage() {
             </CardHeader>
           </Card>
         </Link>
-        <Card className="h-full opacity-60">
-          <CardHeader>
-            <CardTitle>
-              <h2 className="text-lg">Movie</h2>
-            </CardTitle>
-            <CardDescription>Coming with Radarr import.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-sm">Not available yet.</CardContent>
-        </Card>
+        <Link to="/download/movie" className="rounded-xl focus-visible:ring-2">
+          <Card className="h-full transition-colors hover:border-primary">
+            <CardHeader>
+              <CardTitle>
+                <h2 className="text-lg">Movie</h2>
+              </CardTitle>
+              <CardDescription>
+                Into <code>completed/movies</code>, then Radarr moves it into your library.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
         <Card className="h-full opacity-60">
           <CardHeader>
             <CardTitle>

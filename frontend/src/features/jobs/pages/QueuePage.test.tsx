@@ -1,8 +1,8 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { Job } from '@/features/jobs'
-import { json, mockApi, mockEventSource, renderApp } from '@/test/mockApi'
+import { json, mockApi, mockEventSource, renderApp, sentBodies } from '@/test/mockApi'
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
@@ -27,6 +27,10 @@ const job: Job = {
   completed_path: null,
   file_size: null,
   import_status: 'n/a',
+  import_attempts: 0,
+  import_detail: null,
+  imported_path: null,
+  imported_at: null,
   error_code: null,
   error_message: null,
   created_at: '2026-09-20T10:00:00',
@@ -41,7 +45,21 @@ function mockQueue(jobs: Job[] = [job]) {
     'GET /api/jobs/job-1/log': () =>
       json({ lines: [{ ts: '2026-09-20T10:00:02', level: 'info', line: '[download] 10.0%' }] }),
     'POST /api/jobs/job-1/cancel': () => json({ ...job, status: 'cancelled' }),
+    'POST /api/jobs/job-1/import': () => json({ ...job, import_status: 'pending' }),
   })
+}
+
+const finished: Job = {
+  ...job,
+  status: 'completed',
+  phase: null,
+  progress_pct: 100,
+  speed_bps: null,
+  eta_s: null,
+  file_size: 3040870,
+  completed_path:
+    '/web-downloads/completed/movies/Big Buck Bunny (2008)/Big Buck Bunny (2008) WEBDL-1080p.mkv',
+  finished_at: '2026-09-20T10:01:00',
 }
 
 describe('QueuePage', () => {
@@ -140,6 +158,86 @@ describe('QueuePage', () => {
       screen.getByText('/web-downloads/completed/other/Big Buck Bunny [aqz].mkv'),
     ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
+  })
+
+  it('shows the library path of an imported job', async () => {
+    mockQueue([
+      {
+        ...finished,
+        import_status: 'imported',
+        imported_path: '/movies/Big Buck Bunny (2008)/Big Buck Bunny (2008) WEBDL-1080p.mkv',
+        imported_at: '2026-09-20T10:01:30',
+      },
+    ])
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('✅ Imported')).toBeInTheDocument()
+    expect(
+      screen.getByText('/movies/Big Buck Bunny (2008)/Big Buck Bunny (2008) WEBDL-1080p.mkv'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry import' })).not.toBeInTheDocument()
+  })
+
+  it("shows Radarr's reasons and offers Retry import", async () => {
+    const fetchMock = mockQueue([
+      {
+        ...finished,
+        import_status: 'not_imported',
+        import_detail: {
+          rejections: ['Not an upgrade for existing movie file(s)', 'Unknown movie'],
+        },
+      },
+    ])
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('⚠ Not imported')).toBeInTheDocument()
+    const reasons = within(screen.getByRole('list', { name: "Radarr's reasons" })).getAllByRole(
+      'listitem',
+    )
+    expect(reasons.map((item) => item.textContent)).toEqual([
+      'Not an upgrade for existing movie file(s)',
+      'Unknown movie',
+    ])
+    expect(screen.getByText(/Import manually: open Radarr/)).toHaveTextContent(
+      finished.completed_path!,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry import' }))
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'POST /api/jobs/job-1/import')).toHaveLength(1),
+    )
+  })
+
+  it('shows an import error with the hint, and applies the job.import event', async () => {
+    mockQueue([
+      {
+        ...finished,
+        import_status: 'error',
+        import_attempts: 1,
+        import_detail: {
+          error: 'Radarr rejected the API key; check it in Settings',
+          hint: 'check the API key in Settings',
+        },
+      },
+    ])
+    const eventSource = mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('❌ Import error')).toBeInTheDocument()
+    expect(screen.getByText('check the API key in Settings')).toBeInTheDocument()
+
+    eventSource.last!.emit('job.import', {
+      job_id: 'job-1',
+      import_status: 'imported',
+      imported_path: '/movies/Big Buck Bunny (2008)/file.mkv',
+      import_detail: null,
+    })
+
+    expect(await screen.findByText('✅ Imported')).toBeInTheDocument()
+    expect(screen.getByText('/movies/Big Buck Bunny (2008)/file.mkv')).toBeInTheDocument()
   })
 
   it('opens the log drawer', async () => {

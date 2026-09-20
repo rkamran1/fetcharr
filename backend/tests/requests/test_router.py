@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -12,6 +13,8 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.inspections.models import Inspection
+from app.jobs.models import Job
+from app.requests.models import Request
 from tests.conftest import make_client, setup_account
 from tests.fake_ytdlp import FakeYtdlp
 
@@ -35,6 +38,13 @@ INFO = {
     "stream_type": "http",
     "auto": {"fragments": 1, "use_aria2c": False},
 }
+
+
+# Sync on purpose: ruff's ASYNC240 forbids pathlib I/O inside an async test body.
+def put_file(path: Path, content: bytes = b"an earlier download") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
 
 OPTIONS = {
     "quality": "1080p",
@@ -168,3 +178,135 @@ async def test_preview_follows_the_container(
     assert response.json()["path"] == str(
         settings.completed_dir / "other" / "Some - Video [abc123].mp4"
     )
+
+
+# ------------------------------------------- AC4/AC15: movies and collisions
+
+MOVIE = {"radarr_movie_id": 7, "title": "Big Buck Bunny", "year": 2008}
+
+
+async def test_creates_a_movie_request_with_radarrs_own_title(
+    signed_in: httpx.AsyncClient, app: FastAPI, add_inspection: Callable[..., Any]
+) -> None:
+    inspection_id = await add_inspection(title="BIG BUCK BUNNY (Official Full Movie) [4K]")
+
+    response = await signed_in.post(
+        "/api/requests",
+        json={
+            "media_type": "movie",
+            "media": MOVIE,
+            "items": [{"inspection_id": inspection_id}],
+            "options": OPTIONS,
+            "collision_policy": "replace",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    async with app.state.db.read_session() as session:
+        request = await session.get(Request, body["id"])
+        job = await session.get(Job, body["jobs"][0])
+    assert request is not None and job is not None
+    assert (request.title, request.year, request.radarr_movie_id) == ("Big Buck Bunny", 2008, 7)
+    assert job.collision_policy == "replace"
+    # A movie still has to be imported; `other` never does (§6).
+    assert job.import_status == "pending"
+
+
+async def test_a_movie_request_needs_its_media_block(
+    signed_in: httpx.AsyncClient, add_inspection: Callable[..., Any]
+) -> None:
+    inspection_id = await add_inspection()
+
+    response = await signed_in.post(
+        "/api/requests",
+        json={
+            "media_type": "movie",
+            "items": [{"inspection_id": inspection_id}],
+            "options": OPTIONS,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "media block" in response.text
+
+
+async def test_preview_for_a_movie_uses_the_given_title_and_year(
+    signed_in: httpx.AsyncClient, settings: Settings, add_inspection: Callable[..., Any]
+) -> None:
+    inspection_id = await add_inspection()
+
+    response = await signed_in.post(
+        "/api/preview",
+        json={
+            "media_type": "movie",
+            "media": MOVIE,
+            "inspection_id": inspection_id,
+            "options": OPTIONS,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "path": str(
+            settings.completed_dir
+            / "movies"
+            / "Big Buck Bunny (2008)"
+            / "Big Buck Bunny (2008) WEBDL-1080p.mkv"
+        ),
+        "exists": False,
+    }
+
+
+async def test_preview_estimates_the_quality_from_the_available_heights(
+    signed_in: httpx.AsyncClient, add_inspection: Callable[..., Any]
+) -> None:
+    inspection_id = await add_inspection(video_heights=[720, 480])
+
+    best = await signed_in.post(
+        "/api/preview",
+        json={
+            "media_type": "movie",
+            "media": MOVIE,
+            "inspection_id": inspection_id,
+            "options": {**OPTIONS, "quality": "best"},
+        },
+    )
+    capped = await signed_in.post(
+        "/api/preview",
+        json={
+            "media_type": "movie",
+            "media": MOVIE,
+            "inspection_id": inspection_id,
+            "options": {**OPTIONS, "quality": "1080p"},
+        },
+    )
+
+    # 1080p isn't there, so the ceiling really gets the 720p format.
+    assert best.json()["path"].endswith("Big Buck Bunny (2008) WEBDL-720p.mkv")
+    assert capped.json()["path"].endswith("Big Buck Bunny (2008) WEBDL-720p.mkv")
+
+
+async def test_preview_reports_an_existing_file(
+    signed_in: httpx.AsyncClient, settings: Settings, add_inspection: Callable[..., Any]
+) -> None:
+    inspection_id = await add_inspection()
+    existing = (
+        settings.completed_dir
+        / "movies"
+        / "Big Buck Bunny (2008)"
+        / "Big Buck Bunny (2008) WEBDL-1080p.mkv"
+    )
+    put_file(existing)
+
+    response = await signed_in.post(
+        "/api/preview",
+        json={
+            "media_type": "movie",
+            "media": MOVIE,
+            "inspection_id": inspection_id,
+            "options": OPTIONS,
+        },
+    )
+
+    assert response.json() == {"path": str(existing), "exists": True}

@@ -1,6 +1,7 @@
 """The job API shapes (requirements §11)."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -23,6 +24,10 @@ class JobRead(BaseModel):
     completed_path: str | None
     file_size: int | None
     import_status: str
+    import_attempts: int
+    import_detail: dict[str, Any] | None
+    imported_path: str | None
+    imported_at: datetime | None
     error_code: str | None
     error_message: str | None
     created_at: datetime

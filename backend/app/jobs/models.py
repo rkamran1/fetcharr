@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, utcnow
 from app.jobs.constants import ImportStatus, JobStatus
+from app.library.organizer import CollisionPolicy
 
 
 class Job(Base):
@@ -55,8 +56,16 @@ class Job(Base):
     sidecar_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
     file_size: Mapped[int | None] = mapped_column(Integer)
     probed: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # What to do when the destination is already taken; the wizard asks first (§7.3).
+    collision_policy: Mapped[str] = mapped_column(String, default=CollisionPolicy.KEEP_BOTH)
 
+    # The Radarr/Sonarr import (§7.5). A failed import never fails the job itself (§6).
     import_status: Mapped[str] = mapped_column(String, default=ImportStatus.NOT_APPLICABLE)
+    import_command_id: Mapped[str | None] = mapped_column(String)
+    import_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    import_detail: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    imported_path: Mapped[str | None] = mapped_column(String)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime)
     error_code: Mapped[str | None] = mapped_column(String)
     error_message: Mapped[str | None] = mapped_column(String)
 

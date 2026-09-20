@@ -21,6 +21,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 BASE_URL = "http://test"
 USERNAME = "owner"
 PASSWORD = "correct horse battery"
+RADARR_URL = "http://radarr.test:7878"
+RADARR_API_KEY = "0123456789abcdef0123456789abcdef"
 
 SIZES = {
     "landscape": (1920, 1080),
@@ -63,12 +65,14 @@ def downloads_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def settings(migrated_db_url: str, downloads_dir: Path) -> Settings:
+def settings(migrated_db_url: str, downloads_dir: Path, tmp_path: Path) -> Settings:
     return Settings(
         app_version="1.2.3",
         database_url=migrated_db_url,
         completed_dir=downloads_dir / "completed",
         incomplete_dir=downloads_dir / "incomplete",
+        # Never /config: the key is generated inside the test's own tmp_path (§8).
+        secret_key_file=tmp_path / "secret.key",
     )
 
 
@@ -101,6 +105,15 @@ async def setup_account(client: httpx.AsyncClient) -> httpx.Response:
 
 async def login(client: httpx.AsyncClient, password: str = PASSWORD) -> httpx.Response:
     return await client.post("/api/auth/login", json={"username": USERNAME, "password": password})
+
+
+async def configure_radarr(
+    client: httpx.AsyncClient, url: str = RADARR_URL, api_key: str = RADARR_API_KEY
+) -> None:
+    response = await client.patch(
+        "/api/settings", json={"radarr_url": url, "radarr_api_key": api_key}
+    )
+    assert response.status_code == 200, response.text
 
 
 async def create_api_key(client: httpx.AsyncClient) -> str:

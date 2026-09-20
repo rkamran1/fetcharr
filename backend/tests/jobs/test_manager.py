@@ -18,25 +18,7 @@ from app.jobs.manager import PROGRESS_DB_INTERVAL_S, JobManager
 from app.library.organizer import MARKER
 from tests.conftest import exists, is_file, names, setup_account, wait_until
 from tests.fake_ytdlp import FakeYtdlp
-
-TERMINAL = (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
-
-
-async def wait_for_status(read_job: Callable[[str], Any], job_id: str, *statuses: str) -> Any:
-    """Poll the row until the manager has written one of these statuses."""
-    seen: list[str] = []
-
-    async def reached() -> bool:
-        job = await read_job(job_id)
-        seen.append(job.status)
-        return job.status in statuses
-
-    async with asyncio.timeout(30):
-        while True:
-            if await reached():
-                return await read_job(job_id)
-            await asyncio.sleep(0.02)
-
+from tests.jobs.conftest import TERMINAL, wait_for_status
 
 # --------------------------------------------------------------- AC1: end to end
 

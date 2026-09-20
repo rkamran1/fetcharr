@@ -60,16 +60,19 @@ backend/app/
 ├── jobs/              # domain: + pipeline.py (the four steps) and manager.py (the JobManager)
 ├── events/            # domain: the in-memory EventHub and the /api/events SSE stream
 ├── system/            # domain: the startup path self-test and /api/system/status
+├── settings/          # domain: the settings store, the Fernet helpers (utils.py) and /api/settings
+├── arr/               # domain: /api/arr/radarr/* (the connection test and the movie picker)
 ├── ytdlp/             # library: schemas (DownloadOptions), command, formats, stream, runtime, inspect, runner
+├── integrations/      # library: arr.py (the Radarr client, its movie cache and the import lock)
 └── library/           # library: naming, organizer, probe
 ```
 
 - **Domain package:** a folder under `backend/app/` for one feature. Allowed files: `router.py`, `schemas.py`, `service.py`, `models.py`, `dependencies.py`, `exceptions.py`, `constants.py`, `utils.py`. Create only the files the domain needs. Any other module name needs a line here first.
 - **Extra modules, by exception:** `jobs/` also has `pipeline.py` (the four checkpointed steps of §6.1) and `manager.py` (the `JobManager`: claim loop, recovery, concurrency, throttled writes). They are listed in `EXTRA_MODULES` in `test_structure.py`; nothing else may add a module name without a line here.
-- **Library package** (`ytdlp/`, `library/`, later `transcode/`, `integrations/`): no endpoints and no FastAPI imports. Same file names where they apply (`schemas.py` for Pydantic models, `utils.py` for pure helpers); otherwise modules named after what they wrap (`command.py`, `probe.py`). A new library package is added to `LIBRARY_PACKAGES` in `test_structure.py` and to this list; every other package under `app/` (except `db/`) counts as a domain.
+- **Library package** (`ytdlp/`, `library/`, `integrations/`, later `transcode/`): no endpoints and no FastAPI imports. Same file names where they apply (`schemas.py` for Pydantic models, `utils.py` for pure helpers); otherwise modules named after what they wrap (`command.py`, `probe.py`). A new library package is added to `LIBRARY_PACKAGES` in `test_structure.py` and to this list; every other package under `app/` (except `db/`) counts as a domain.
 - **`router.py`:** HTTP only. Parse the request (via schemas), call one service method, map domain exceptions to HTTP responses. Never imports `sqlalchemy`, `app.db`, `asyncio.subprocess` or another domain's `service`. Routers are included in `main.py` with `dependencies=[Depends(require_auth)]` unless public by design.
 - **`schemas.py`:** every Pydantic `BaseModel` lives in a `schemas.py`. The only exception is `Settings` in `config.py`.
-- **`service.py`:** one service class per domain (`<Domain>Service`), constructed with its dependencies (`Database`, `Settings`, other services). A `get_<domain>_service` dependency in `dependencies.py` builds it per request. The two exceptions are the long-lived `JobManager` (`app.state.manager`) and `EventHub` (`app.state.hub`), created in the lifespan because they own the running jobs and the in-memory progress (§6.1, §3.1 rule 5); request-scoped services take them as constructor arguments. It holds the business logic, all DB access (through `Database.read_session()` / `write_session()`, §3.1) and calls into libraries. It never imports `fastapi` and never raises `HTTPException`: it raises the domain's exceptions.
+- **`service.py`:** one service class per domain (`<Domain>Service`), constructed with its dependencies (`Database`, `Settings`, other services). A `get_<domain>_service` dependency in `dependencies.py` builds it per request. The two exceptions are the long-lived `JobManager` (`app.state.manager`), `EventHub` (`app.state.hub`) and `RadarrClient` (`app.state.radarr`, a library object), created in the lifespan because they own the running jobs, the in-memory progress and the one connection pool, movie cache and import lock (§6.1, §3.1 rule 5); request-scoped services take them as constructor arguments. It holds the business logic, all DB access (through `Database.read_session()` / `write_session()`, §3.1) and calls into libraries. It never imports `fastapi` and never raises `HTTPException`: it raises the domain's exceptions.
 - **`models.py`:** the domain's SQLAlchemy models, on `app.db.base.Base`. Every models module is imported in `app/db/registry.py`. Moving a model between modules is not a schema change; `alembic check` must stay clean.
 - **`exceptions.py`:** domain errors carry what the router needs (e.g. status, message, `needs_cookies`); the router maps them. Libraries raise their own errors (e.g. `ytdlp.inspect.YtdlpError(kind, message)`), which the service maps to domain errors.
 - **`utils.py`:** pure functions and small helpers; no DB, no HTTP. Blocking helpers are called through `asyncio.to_thread` by the service.
@@ -109,7 +112,7 @@ frontend/src/
 - **Retries:** only `tenacity.AsyncRetrying` with explicit retryable exception types and `reraise=True`. No hand-written retry loops. Tests use `wait_none()`.
 - **Subprocesses:** yt-dlp/ffmpeg always as argv lists (`asyncio.create_subprocess_exec`), never a shell. Only allow-listed yt-dlp options.
 - **Files:** work in `incomplete/<job_id>/`, then an atomic move to `completed/`. Final paths are resolved and checked to stay inside their root.
-- **Secrets:** cookies and arr API keys are encrypted at rest, never returned by the API, never logged.
+- **Secrets:** cookies and arr API keys are Fernet-encrypted at rest with the key from `SECRET_KEY`/`SECRET_KEY_FILE` (loaded once in the lifespan onto `app.state.secret_key`), never returned by the API, never logged.
 - **Endpoints:** every non-public endpoint requires a session. Each endpoint has a test, including the unauthenticated `401` case.
 - **Migrations:** each model change gets an Alembic revision (`backend/app/db/migrations/versions/`). Applied revisions are never edited.
 - **Config:** each env var is in `backend/app/config.py`, `docker-compose.example.yml` and the README env table.

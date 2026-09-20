@@ -15,6 +15,13 @@ services:
       # - INCOMPLETE_DIR=/web-downloads/incomplete  # default shown
       # - MAX_CONCURRENT_DOWNLOADS=2   # default shown; fetcharr runs one process (§6.1)
       # - AUTO_RESUME=true        # default shown; false fails interrupted jobs instead
+      # Secrets at rest (cookies, arr API keys). Leave both unset and fetcharr generates
+      # the key file on first start; back it up with /config or the stored keys are lost.
+      # - SECRET_KEY=                # a Fernet key (32 url-safe base64 bytes); overrides the file
+      # - SECRET_KEY_FILE=/config/secret.key   # default shown
+      # Radarr, if you would rather configure it here than in Settings. Set here, these win.
+      # - RADARR_URL=http://radarr:7878
+      # - RADARR_API_KEY=
       # APP_VERSION is set by the image build; don't override it.
     volumes:
       - /path/to/appdata/fetcharr:/config   # LOCAL disk (SQLite database, backups)

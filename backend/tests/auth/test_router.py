@@ -125,8 +125,14 @@ async def test_login_sets_session_cookie(app: FastAPI, client: httpx.AsyncClient
     assert account is not None and account.last_login_at is not None
 
 
-async def test_login_cookie_secure_when_configured(migrated_db_url: str, static_dir: Path) -> None:
-    settings = Settings(database_url=migrated_db_url, cookie_secure=True)
+async def test_login_cookie_secure_when_configured(
+    migrated_db_url: str, static_dir: Path, tmp_path: Path
+) -> None:
+    settings = Settings(
+        database_url=migrated_db_url,
+        cookie_secure=True,
+        secret_key_file=tmp_path / "secret.key",
+    )
     application = create_app(settings, static_dir=static_dir)
     async with application.router.lifespan_context(application), make_client(application) as c:
         setup = await setup_account(c)

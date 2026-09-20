@@ -19,12 +19,15 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
-from app.jobs.constants import ACTIVE_STATUSES, ImportStatus, JobStatus, Step
+from app.integrations.arr import ImportPolicy, RadarrClient
+from app.jobs.constants import ACTIVE_STATUSES, JobStatus, Step
 from app.jobs.models import Job, JobLog
 from app.jobs.pipeline import PipelineContext, execute
 from app.jobs.utils import as_stream_type
-from app.library.naming import Other
+from app.library.naming import Movie, Other, Target
+from app.library.organizer import CollisionPolicy
 from app.requests.models import Request
+from app.settings.service import SettingsService
 from app.ytdlp.runner import DOWNLOAD_WAIT, DownloadCancelled, Progress, YtDlpFatal
 from app.ytdlp.runtime import JsRuntime, detect_js_runtime
 from app.ytdlp.schemas import DownloadOptions
@@ -50,6 +53,18 @@ class _Claimed:
     options: DownloadOptions
     last_completed_step: Step | None
     completed_path: Path | None
+    collision_policy: str
+    import_status: str
+    media_type: str
+    title: str | None
+    year: int | None
+    radarr_movie_id: int | None
+
+    def target(self) -> Target:
+        """Radarr's own title and year for a movie, the video's own title for other (§7.2)."""
+        if self.media_type == "movie":
+            return Movie(title=self.title or self.source_title, year=self.year)
+        return Other(title=self.source_title, id=self.video_id)
 
 
 class JobManager:
@@ -58,13 +73,19 @@ class JobManager:
         db: Database,
         settings: Settings,
         hub: EventHub,
+        settings_service: SettingsService,
+        radarr: RadarrClient,
         *,
         download_wait: Any = DOWNLOAD_WAIT,
+        import_policy: ImportPolicy | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.hub = hub
+        self.settings_service = settings_service
+        self.radarr = radarr
         self.download_wait = download_wait
+        self.import_policy = import_policy or ImportPolicy()
         self.aria2c_available = False
         self.js_runtime: JsRuntime | None = None
         self._slot = asyncio.Semaphore(settings.max_concurrent_downloads)
@@ -154,6 +175,12 @@ class JobManager:
                 if job.last_completed_step
                 else None,
                 completed_path=Path(job.completed_path) if job.completed_path else None,
+                collision_policy=job.collision_policy,
+                import_status=job.import_status,
+                media_type=request.media_type,
+                title=request.title,
+                year=request.year,
+                radarr_movie_id=request.radarr_movie_id,
             )
         self.hub.publish(
             "job.state", {"job_id": claimed.id, "status": JobStatus.STARTING, "phase": None}
@@ -196,12 +223,15 @@ class JobManager:
         def on_attempt(number: int) -> None:
             self._spawn(self._write_attempt(job.id, number))
 
+        # Resolved before the step starts, so no transaction spans the call to Radarr (§3.1).
+        connection = await self.settings_service.radarr() if job.media_type == "movie" else None
+
         context = PipelineContext(
             job_id=job.id,
             url=job.url,
             options=job.options,
             stream_type=as_stream_type(job.stream_type),
-            target=Other(title=job.source_title, id=job.video_id),
+            target=job.target(),
             job_dir=job.job_dir,
             completed_dir=self.settings.completed_dir,
             incomplete_dir=self.settings.incomplete_dir,
@@ -218,6 +248,12 @@ class JobManager:
             js_runtime=self.js_runtime,
             last_completed_step=job.last_completed_step,
             completed_path=job.completed_path,
+            collision_policy=CollisionPolicy(job.collision_policy),
+            import_status=job.import_status,
+            radarr_movie_id=job.radarr_movie_id,
+            radarr=self.radarr,
+            radarr_connection=connection,
+            import_policy=self.import_policy,
             download_wait=self.download_wait,
         )
 
@@ -297,6 +333,16 @@ class JobManager:
             job.last_completed_step = step
             for name, value in fields.items():
                 setattr(job, name, value)
+        if "import_status" in fields:
+            self.hub.publish(
+                "job.import",
+                {
+                    "job_id": job_id,
+                    "import_status": fields["import_status"],
+                    "imported_path": fields.get("imported_path"),
+                    "import_detail": fields.get("import_detail"),
+                },
+            )
 
     async def _finish(
         self,
@@ -313,7 +359,6 @@ class JobManager:
                 "finished_at": utcnow(),
                 "error_code": error_code,
                 "error_message": error_message,
-                "import_status": ImportStatus.NOT_APPLICABLE,
                 # A finished job has no speed or ETA; leaving the last sample there
                 # makes the queue look like it is still downloading.
                 "speed_bps": None,

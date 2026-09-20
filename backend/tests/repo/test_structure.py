@@ -11,7 +11,7 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[2] / "app"
 
-LIBRARY_PACKAGES = {"ytdlp", "library"}
+LIBRARY_PACKAGES = {"ytdlp", "library", "integrations"}
 INFRA_PACKAGES = {"db"}
 DOMAIN_MODULES = {
     "__init__.py",
@@ -118,6 +118,23 @@ def test_domain_packages_have_expected_files() -> None:
             "schemas.py",
             "service.py",
             "models.py",
+            "dependencies.py",
+            "exceptions.py",
+            "utils.py",
+        },
+        "settings": {
+            "router.py",
+            "schemas.py",
+            "service.py",
+            "models.py",
+            "dependencies.py",
+            "exceptions.py",
+            "utils.py",
+        },
+        "arr": {
+            "router.py",
+            "schemas.py",
+            "service.py",
             "dependencies.py",
             "exceptions.py",
         },

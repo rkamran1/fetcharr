@@ -15,3 +15,9 @@ class Settings(BaseSettings):
     max_concurrent_downloads: int = 2
     # Resume interrupted jobs from their checkpoint on boot; false fails them instead.
     auto_resume: bool = True
+    # The Fernet key for secrets at rest (§8). Set it, or let the file below be generated.
+    secret_key: str | None = None
+    secret_key_file: Path = Path("/config/secret.key")
+    # Set here, these win over whatever Settings holds (requirements §7.5).
+    radarr_url: str | None = None
+    radarr_api_key: str | None = None

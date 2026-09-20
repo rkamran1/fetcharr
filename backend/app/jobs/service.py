@@ -10,8 +10,14 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
-from app.jobs.constants import CANCELLABLE_STATUSES, JobStatus
-from app.jobs.exceptions import CancelTooLate, JobNotFound, RetryNotPossible, UnsafePath
+from app.jobs.constants import CANCELLABLE_STATUSES, ImportStatus, JobStatus, Step
+from app.jobs.exceptions import (
+    CancelTooLate,
+    ImportNotPossible,
+    JobNotFound,
+    RetryNotPossible,
+    UnsafePath,
+)
 from app.jobs.manager import JobManager
 from app.jobs.models import Job, JobLog
 from app.jobs.schemas import JobList, JobLogRead, JobRead, LogLine
@@ -107,6 +113,25 @@ class JobService:
         self.manager.wake()
         return read
 
+    async def retry_import(self, job_id: str) -> JobRead:
+        """Re-run only the import step (§7.5). The download and the move stay as they are."""
+        async with self.db.write_session() as session:
+            job = await session.get(Job, job_id)
+            if job is None:
+                raise JobNotFound(job_id)
+            if job.import_status not in (ImportStatus.NOT_IMPORTED, ImportStatus.ERROR):
+                raise ImportNotPossible(job.import_status)
+            job.import_status = ImportStatus.PENDING
+            job.import_detail = None
+            # The checkpoint stays at `organize`, so the claim loop resumes at `import`.
+            job.last_completed_step = Step.ORGANIZE
+            job.status = JobStatus.QUEUED
+            job.phase = None
+            job.finished_at = None
+            read = self.read(job)
+        self.manager.wake()
+        return read
+
     async def delete(self, job_id: str, delete_file: bool = False) -> None:
         """Remove the job, and its file when asked, but only inside fetcharr's folders."""
         async with self.db.read_session() as session:
@@ -148,6 +173,10 @@ class JobService:
             completed_path=job.completed_path,
             file_size=job.file_size,
             import_status=job.import_status,
+            import_attempts=job.import_attempts,
+            import_detail=job.import_detail,
+            imported_path=job.imported_path,
+            imported_at=job.imported_at,
             error_code=job.error_code,
             error_message=job.error_message,
             created_at=job.created_at,

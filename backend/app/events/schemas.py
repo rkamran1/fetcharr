@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-EventType = Literal["job.progress", "job.state", "job.log", "request.summary"]
+EventType = Literal["job.progress", "job.state", "job.import", "job.log", "request.summary"]
 
 
 class Event(BaseModel):

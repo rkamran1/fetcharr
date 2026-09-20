@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
+from app.arr import router as arr_router
 from app.auth import router as auth_router
 from app.auth.dependencies import check_origin, require_auth
 from app.auth.utils import LoginRateLimiter
@@ -15,9 +16,13 @@ from app.db.session import Database
 from app.events import router as events_router
 from app.events.service import EventHub
 from app.inspections import router as inspections_router
+from app.integrations.arr import RadarrClient
 from app.jobs import router as jobs_router
 from app.jobs.manager import JobManager
 from app.requests import router as requests_router
+from app.settings import router as settings_router
+from app.settings.service import SettingsService
+from app.settings.utils import load_secret_key
 from app.system import router as system_router
 from app.system.utils import PathReport, check_paths
 
@@ -33,17 +38,31 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.db = Database(settings.database_url)
         app.state.hub = EventHub()
+        # Reading or generating the key file is blocking, and happens once (§3.2, §8).
+        app.state.secret_key = await asyncio.to_thread(
+            load_secret_key, settings.secret_key, settings.secret_key_file
+        )
         # Many filesystem calls, so off the event loop (§3.2, §7.6).
         app.state.path_report = await asyncio.to_thread(
             check_paths, settings.completed_dir, settings.incomplete_dir
         )
         _warn_about_paths(app.state.path_report)
-        app.state.manager = JobManager(app.state.db, settings, app.state.hub)
+        # Long-lived like the hub and the manager: one connection pool, one movie cache
+        # and one import lock for the whole process (§6.1).
+        app.state.radarr = RadarrClient()
+        app.state.manager = JobManager(
+            app.state.db,
+            settings,
+            app.state.hub,
+            SettingsService(app.state.db, settings, app.state.secret_key),
+            app.state.radarr,
+        )
         await app.state.manager.start()
         try:
             yield
         finally:
             await app.state.manager.stop()
+            await app.state.radarr.aclose()
             await app.state.db.dispose()
 
     app = FastAPI(title="fetcharr", version=settings.app_version, lifespan=lifespan)
@@ -62,6 +81,8 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     app.include_router(jobs_router.router, dependencies=[Depends(require_auth)])
     app.include_router(events_router.router, dependencies=[Depends(require_auth)])
     app.include_router(system_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(settings_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(arr_router.router, dependencies=[Depends(require_auth)])
 
     @app.api_route(
         "/api/{path:path}",

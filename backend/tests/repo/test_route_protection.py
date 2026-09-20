@@ -61,6 +61,12 @@ async def test_every_non_public_api_route_requires_auth(
         ("DELETE", "/api/jobs/{job_id}"),
         ("GET", "/api/events"),
         ("GET", "/api/system/status"),
+        # M5b's endpoints.
+        ("POST", "/api/jobs/{job_id}/import"),
+        ("GET", "/api/settings"),
+        ("PATCH", "/api/settings"),
+        ("POST", "/api/arr/radarr/test"),
+        ("GET", "/api/arr/radarr/movies"),
     ):
         assert route in checked, route
 

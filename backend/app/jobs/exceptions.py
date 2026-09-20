@@ -27,3 +27,12 @@ class RetryNotPossible(JobError):
 class UnsafePath(JobError):
     def __init__(self, path: str) -> None:
         super().__init__(400, f"{path} is outside the fetcharr folders")
+
+
+class ImportNotPossible(JobError):
+    """Retry import is for a job Radarr refused or couldn't be asked about (§7.5)."""
+
+    def __init__(self, import_status: str) -> None:
+        super().__init__(
+            409, f"Only a not-imported or errored import can be re-run; this one is {import_status}"
+        )
