@@ -55,6 +55,14 @@ async def retry_job(job_id: str, service: Service) -> JobRead:
         raise _http(error) from error
 
 
+@router.post("/{job_id}/import", response_model=JobRead)
+async def retry_import(job_id: str, service: Service) -> JobRead:
+    try:
+        return await service.retry_import(job_id)
+    except JobError as error:
+        raise _http(error) from error
+
+
 @router.delete("/{job_id}", status_code=204)
 async def delete_job(
     job_id: str,

@@ -10,6 +10,11 @@ export type JobStatus =
   | 'failed'
   | 'cancelled'
 
+export type ImportStatus = 'n/a' | 'pending' | 'imported' | 'not_imported' | 'error'
+
+/** Radarr's own words: why it refused, or what went wrong asking it (§7.5). */
+export type ImportDetail = { rejections?: string[]; error?: string; hint?: string }
+
 export type Job = {
   id: string
   request_id: string
@@ -27,7 +32,11 @@ export type Job = {
   eta_s: number | null
   completed_path: string | null
   file_size: number | null
-  import_status: string
+  import_status: ImportStatus
+  import_attempts: number
+  import_detail: ImportDetail | null
+  imported_path: string | null
+  imported_at: string | null
   error_code: string | null
   error_message: string | null
   created_at: string
@@ -47,6 +56,14 @@ export type ProgressEvent = {
   total_bytes: number | null
   speed_bps: number | null
   eta_s: number | null
+}
+
+/** The `job.import` SSE payload: how the Radarr import ended (§6). */
+export type ImportEvent = {
+  job_id: string
+  import_status: ImportStatus
+  imported_path: string | null
+  import_detail: ImportDetail | null
 }
 
 /** The `job.state` SSE payload: what changed when a job moved on. */

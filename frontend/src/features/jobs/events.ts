@@ -2,7 +2,7 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import { jobsQueryKey } from './api'
-import type { Job, JobList, ProgressEvent, StateEvent } from './types'
+import type { ImportEvent, Job, JobList, ProgressEvent, StateEvent } from './types'
 
 function merge(queryClient: QueryClient, jobId: string, patch: Partial<Job>): void {
   let seen = false
@@ -37,8 +37,13 @@ export function useJobEvents(): void {
     // Every (re)connect refetches, so nothing missed while disconnected stays stale.
     const onOpen = () => void queryClient.invalidateQueries({ queryKey: jobsQueryKey })
 
+    const onImport = (event: MessageEvent<string>) => {
+      const { job_id: jobId, ...state } = JSON.parse(event.data) as ImportEvent
+      merge(queryClient, jobId, state)
+    }
     source.addEventListener('job.progress', onProgress)
     source.addEventListener('job.state', onState)
+    source.addEventListener('job.import', onImport)
     source.addEventListener('open', onOpen)
     return () => source.close()
   }, [queryClient])

@@ -97,6 +97,19 @@ async def organize(
     )
 
 
+def prune_empty_dirs(directory: Path, root: Path) -> None:
+    """Remove `directory` and its now-empty parents, stopping below `root` (§7.5 step 4)."""
+    current = directory.resolve()
+    stop = root.resolve()
+    while current != stop and current.is_relative_to(stop):
+        try:
+            current.rmdir()
+        except OSError:
+            # Still holding something (another job's file, or arr's leftovers): leave it.
+            return
+        current = current.parent
+
+
 def is_organized(job_dir: Path, video_path: Path, completed_path: Path | None = None) -> bool:
     """The organize step's done-check: the video is at its destination and gone from the job."""
     destination = completed_path or _read_marker(job_dir)

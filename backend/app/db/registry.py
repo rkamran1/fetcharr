@@ -8,7 +8,8 @@ from app.db.base import Base
 from app.inspections import models as inspections_models
 from app.jobs import models as jobs_models
 from app.requests import models as requests_models
+from app.settings import models as settings_models
 
-MODEL_MODULES = (auth_models, inspections_models, requests_models, jobs_models)
+MODEL_MODULES = (auth_models, inspections_models, requests_models, jobs_models, settings_models)
 
 metadata = Base.metadata

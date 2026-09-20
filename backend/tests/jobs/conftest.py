@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 from tenacity import wait_none
 
@@ -12,13 +14,20 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
+from app.integrations.arr import ImportPolicy, RadarrClient
 from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.manager import JobManager
 from app.jobs.models import Job, JobLog
 from app.requests.models import Request
+from app.settings.service import SettingsService
 from app.ytdlp.schemas import DownloadOptions
 
 URL = "https://example.com/watch?v=abc123"
+TERMINAL = (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
+#: The import policy under test never sleeps and never waits ten minutes (§6.1).
+TEST_IMPORT_POLICY = ImportPolicy(
+    wait=wait_none(), attempts=4, poll_interval=0.0, command_timeout=1.0
+)
 
 
 @pytest.fixture
@@ -36,16 +45,37 @@ def hub() -> EventHub:
 
 
 @pytest.fixture
-def make_manager(db: Database, settings: Settings, hub: EventHub) -> Callable[..., JobManager]:
+def secret_key() -> bytes:
+    return Fernet.generate_key()
+
+
+@pytest.fixture
+async def radarr() -> AsyncIterator[RadarrClient]:
+    client = RadarrClient()
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
+@pytest.fixture
+def make_manager(
+    db: Database, settings: Settings, hub: EventHub, radarr: RadarrClient, secret_key: bytes
+) -> Callable[..., JobManager]:
     """A manager whose retries never sleep (§6.1: the wait strategy is injectable)."""
     managers: list[JobManager] = []
 
     def build(**overrides: Any) -> JobManager:
+        chosen_db = overrides.pop("db", db)
+        chosen_settings = overrides.pop("settings", settings)
         manager = JobManager(
-            overrides.pop("db", db),
-            overrides.pop("settings", settings),
+            chosen_db,
+            chosen_settings,
             overrides.pop("hub", hub),
+            SettingsService(chosen_db, chosen_settings, secret_key),
+            overrides.pop("radarr", radarr),
             download_wait=wait_none(),
+            import_policy=overrides.pop("import_policy", TEST_IMPORT_POLICY),
         )
         managers.append(manager)
         return manager
@@ -75,6 +105,9 @@ def new_job(db: Database, settings: Settings) -> Callable[..., Any]:
         options: DownloadOptions | None = None,
         request_id: str | None = None,
         created_at: datetime | None = None,
+        media_type: str = "other",
+        year: int | None = None,
+        radarr_movie_id: int | None = None,
         **fields: Any,
     ) -> str:
         job_id = str(uuid.uuid4())
@@ -86,8 +119,10 @@ def new_job(db: Database, settings: Settings) -> Callable[..., Any]:
                 session.add(
                     Request(
                         id=request_id,
-                        media_type="other",
+                        media_type=media_type,
                         title=title,
+                        year=year,
+                        radarr_movie_id=radarr_movie_id,
                         options=chosen.model_dump(),
                         created_at=moment,
                     )
@@ -104,7 +139,13 @@ def new_job(db: Database, settings: Settings) -> Callable[..., Any]:
                     status=fields.pop("status", JobStatus.QUEUED),
                     step_timings=fields.pop("step_timings", {}),
                     sidecar_paths=[],
-                    import_status=ImportStatus.NOT_APPLICABLE,
+                    collision_policy=fields.pop("collision_policy", "keep_both"),
+                    import_status=fields.pop(
+                        "import_status",
+                        ImportStatus.PENDING
+                        if media_type == "movie"
+                        else ImportStatus.NOT_APPLICABLE,
+                    ),
                     max_attempts=chosen.retries + 1,
                     job_dir=str(settings.incomplete_dir / job_id),
                     created_at=moment,
@@ -141,3 +182,13 @@ def read_logs(db: Database) -> Callable[[str], Any]:
 
 def job_dir_of(settings: Settings, job_id: str) -> Path:
     return settings.incomplete_dir / job_id
+
+
+async def wait_for_status(read_job: Callable[[str], Any], job_id: str, *statuses: str) -> Any:
+    """Poll the row until the manager has written one of these statuses."""
+    async with asyncio.timeout(30):
+        while True:
+            job = await read_job(job_id)
+            if job.status in statuses:
+                return job
+            await asyncio.sleep(0.02)

@@ -124,6 +124,20 @@ def test_pipeline_settings_documented(repo_root: Path) -> None:
         assert any(row.startswith(f"| `{name}` | `{default}` |") for row in readme_rows)
 
 
+def test_secret_and_radarr_settings_documented(repo_root: Path) -> None:
+    compose = (repo_root / "docker-compose.example.yml").read_text()
+    readme_rows = [
+        line for line in (repo_root / "README.md").read_text().splitlines() if line.startswith("|")
+    ]
+
+    # SECRET_KEY, RADARR_URL and RADARR_API_KEY have no default worth shipping, so the
+    # compose file names them commented out and the README explains what they do (§13.4).
+    for name in ("SECRET_KEY", "SECRET_KEY_FILE", "RADARR_URL", "RADARR_API_KEY"):
+        assert f"{name}=" in compose, name
+        assert any(row.startswith(f"| `{name}` |") for row in readme_rows), name
+    assert "SECRET_KEY_FILE=/config/secret.key" in compose
+
+
 def test_dev_compose_mounts_the_downloads_directory(repo_root: Path) -> None:
     compose = yaml.safe_load((repo_root / "docker-compose.dev.yml").read_text())
     mounts = dict(

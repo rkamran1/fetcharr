@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
-from app.jobs.constants import JobStatus
+from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.models import Job, JobLog
 from app.requests.models import Request
 from tests.conftest import exists, is_file, make_client, setup_account
@@ -200,3 +200,44 @@ async def test_delete_refuses_a_path_outside_the_roots(
     assert response.status_code == 400
     assert is_file(outside)
     assert (await signed_in.get(f"/api/jobs/{job_id}")).status_code == 200
+
+
+# ------------------------------------------------ AC8: POST /api/jobs/{id}/import
+
+
+async def test_retry_import_requeues_a_rejected_job(
+    signed_in: httpx.AsyncClient, app: FastAPI, add_job: Callable[..., Any]
+) -> None:
+    job_id = await add_job(
+        status=JobStatus.COMPLETED,
+        last_completed_step="import",
+        import_status=ImportStatus.NOT_IMPORTED,
+        import_detail={"rejections": ["Unknown movie"]},
+    )
+
+    response = await signed_in.post(f"/api/jobs/{job_id}/import")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["import_status"] == ImportStatus.PENDING
+    assert body["import_detail"] is None
+    assert body["status"] == JobStatus.QUEUED
+    # It resumes at the import step, so the file is never downloaded or moved again (§6.1).
+    async with app.state.db.read_session() as session:
+        job = await session.get(Job, job_id)
+        assert job is not None and job.last_completed_step == "organize"
+
+
+async def test_retry_import_rejects_an_already_imported_job(
+    signed_in: httpx.AsyncClient, add_job: Callable[..., Any]
+) -> None:
+    job_id = await add_job(status=JobStatus.COMPLETED, import_status=ImportStatus.IMPORTED)
+
+    response = await signed_in.post(f"/api/jobs/{job_id}/import")
+
+    assert response.status_code == 409
+    assert "imported" in response.json()["detail"]
+
+
+async def test_retry_import_rejects_an_unknown_job(signed_in: httpx.AsyncClient) -> None:
+    assert (await signed_in.post("/api/jobs/nope/import")).status_code == 404

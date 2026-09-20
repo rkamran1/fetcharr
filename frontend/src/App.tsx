@@ -13,7 +13,7 @@ import {
   SetupPage,
 } from '@/features/auth'
 import { QueuePage } from '@/features/jobs'
-import { OtherWizardPage } from '@/features/requests'
+import { MovieWizardPage, OtherWizardPage } from '@/features/requests'
 import { SettingsPage } from '@/features/settings'
 import HomePage from '@/pages/HomePage'
 
@@ -57,6 +57,7 @@ export default function App() {
         }
       >
         <Route index element={<HomePage />} />
+        <Route path="download/movie" element={<MovieWizardPage />} />
         <Route path="download/other" element={<OtherWizardPage />} />
         <Route path="queue" element={<QueuePage />} />
         <Route path="settings" element={<SettingsPage />} />
