@@ -2,10 +2,11 @@
 
 import asyncio
 import uuid
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, Select, column, func, or_, select, table, text
 
 from app.config import Settings
 from app.db.base import utcnow
@@ -27,10 +28,12 @@ from app.requests.schemas import (
     MovieMedia,
     PathPreview,
     PreviewRequest,
+    RequestFilters,
+    RequestPage,
     RequestRead,
     TvMedia,
 )
-from app.requests.utils import estimated_quality
+from app.requests.utils import estimated_quality, fts_match, search_words
 from app.ytdlp.schemas import DownloadOptions
 
 
@@ -124,10 +127,35 @@ class RequestService:
                     select(Job).where(Job.request_id == request_id).order_by(Job.created_at, Job.id)
                 )
             )
+        return self._read(request, jobs)
+
+    async def history(self, filters: RequestFilters) -> RequestPage:
+        """History: filtered, searched, newest first, one page at a time (§11, §12)."""
+        count, page = history_queries(filters, self.db.reader.dialect.name)
+        async with self.db.read_session() as session:
+            total = await session.scalar(count)
+            requests = list(await session.scalars(page))
+            jobs = list(await session.scalars(jobs_of([request.id for request in requests])))
+        by_request: dict[str, list[Job]] = {}
+        for job in jobs:
+            by_request.setdefault(job.request_id, []).append(job)
+        return RequestPage(
+            items=[self._read(request, by_request.get(request.id, [])) for request in requests],
+            total=total or 0,
+            page=filters.page,
+            per_page=filters.per_page,
+        )
+
+    def _read(self, request: Request, jobs: list[Job]) -> RequestRead:
         return RequestRead(
             id=request.id,
             media_type=request.media_type,
             title=request.title,
+            year=request.year,
+            numbering=request.numbering,
+            radarr_movie_id=request.radarr_movie_id,
+            sonarr_series_id=request.sonarr_series_id,
+            options=request.options,
             created_at=request.created_at,
             jobs=[self.jobs.read(job) for job in jobs],
         )
@@ -165,6 +193,98 @@ class RequestService:
         except ValueError as error:
             raise UnnameableVideo(str(error)) from error
         return self.settings.completed_dir / relative
+
+
+#: The search index from revision 0009; SQLite only, so it isn't a model (§3.1).
+JOBS_FTS = table("jobs_fts", column("request_id"))
+
+
+def history_queries(filters: RequestFilters, dialect: str) -> tuple[Select[Any], Select[Any]]:
+    """The count and the page of History's query, newest first with a stable order."""
+    conditions = history_conditions(filters, dialect)
+    count = select(func.count()).select_from(Request).where(*conditions)
+    page = (
+        select(Request)
+        .where(*conditions)
+        .order_by(Request.created_at.desc(), Request.id.desc())
+        .limit(filters.per_page)
+        .offset((filters.page - 1) * filters.per_page)
+    )
+    return count, page
+
+
+def jobs_of(request_ids: list[str]) -> Select[tuple[Job]]:
+    """The jobs of a page of requests, in the order they were created."""
+    return select(Job).where(Job.request_id.in_(request_ids)).order_by(Job.created_at, Job.id)
+
+
+def history_conditions(filters: RequestFilters, dialect: str) -> list[ColumnElement[bool]]:
+    """The WHERE clause on `requests` for History's filters, ANDed (§11).
+
+    Status, import status and site are about jobs, and must hold for the same job.
+    """
+    conditions: list[ColumnElement[bool]] = []
+    if filters.type is not None:
+        conditions.append(Request.media_type == filters.type)
+    if filters.from_ is not None:
+        conditions.append(Request.created_at >= _midnight(filters.from_))
+    if filters.to is not None:
+        conditions.append(Request.created_at < _midnight(filters.to + timedelta(days=1)))
+    job_conditions = [
+        condition
+        for value, condition in (
+            (filters.status, Job.status == filters.status),
+            (filters.import_status, Job.import_status == filters.import_status),
+            (filters.site, Job.site_key == filters.site),
+        )
+        if value is not None
+    ]
+    if job_conditions:
+        # Not a correlated EXISTS: SQLite would then walk ix_jobs_status once per request.
+        conditions.append(Request.id.in_(select(Job.request_id).where(*job_conditions)))
+    search = search_request_ids(filters.q, dialect)
+    if search is not None:
+        conditions.append(Request.id.in_(search))
+    return conditions
+
+
+def search_request_ids(q: str | None, dialect: str) -> Select[tuple[str]] | None:
+    """History search, the one repository function (§10): FTS5 on SQLite, else ILIKE."""
+    return fts_request_ids(q) if dialect == "sqlite" else ilike_request_ids(q)
+
+
+def fts_request_ids(q: str | None) -> Select[tuple[str]] | None:
+    """Requests with a job whose request, source or episode title has every word's prefix."""
+    match = fts_match(q)
+    if match is None:
+        return None
+    matches = text("jobs_fts MATCH :match").bindparams(match=match)
+    return select(JOBS_FTS.c.request_id).where(matches)
+
+
+def ilike_request_ids(q: str | None) -> Select[tuple[str]] | None:
+    """The Postgres fallback: every word inside one of the same three titles (§3.1)."""
+    words = search_words(q)
+    if not words:
+        return None
+    return (
+        select(Job.request_id)
+        .join(Request, Request.id == Job.request_id)
+        .where(
+            *(
+                or_(
+                    Request.title.icontains(word, autoescape=True),
+                    Job.source_title.icontains(word, autoescape=True),
+                    Job.episode_title.icontains(word, autoescape=True),
+                )
+                for word in words
+            )
+        )
+    )
+
+
+def _midnight(day: date) -> datetime:
+    return datetime.combine(day, time())
 
 
 def target_for(

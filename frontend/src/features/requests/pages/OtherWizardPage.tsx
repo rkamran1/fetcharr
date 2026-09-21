@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
+import { usePrefill, useDownloadAgain } from '../again'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import { DEFAULT_OPTIONS } from '../types'
@@ -22,6 +23,13 @@ export default function OtherWizardPage() {
 
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id
+
+  // "Download again" from History: the same URL, inspected afresh, with the old options.
+  usePrefill(useDownloadAgain(), ({ job, options }) => {
+    setUrl(job.url)
+    setOptions(options)
+    inspection.mutate(job.url)
+  })
 
   const previewBody: PreviewRequest = {
     media_type: 'other',

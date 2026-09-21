@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.requests.dependencies import get_request_service
 from app.requests.exceptions import RequestError
@@ -11,6 +11,8 @@ from app.requests.schemas import (
     CreateRequest,
     PathPreview,
     PreviewRequest,
+    RequestFilters,
+    RequestPage,
     RequestRead,
 )
 from app.requests.service import RequestService
@@ -30,6 +32,13 @@ async def create_request(body: CreateRequest, service: Service) -> CreatedReques
         return await service.create(body)
     except RequestError as error:
         raise _http(error) from error
+
+
+@router.get("/requests", response_model=RequestPage)
+async def list_requests(
+    filters: Annotated[RequestFilters, Query()], service: Service
+) -> RequestPage:
+    return await service.history(filters)
 
 
 @router.get("/requests/{request_id}", response_model=RequestRead)

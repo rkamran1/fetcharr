@@ -12,6 +12,7 @@ import {
   meQueryKey,
   SetupPage,
 } from '@/features/auth'
+import { HistoryPage } from '@/features/history'
 import { QueuePage } from '@/features/jobs'
 import {
   MissingSeriesPage,
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="download/tv/:seriesId" element={<SeriesPage />} />
         <Route path="download/other" element={<OtherWizardPage />} />
         <Route path="queue" element={<QueuePage />} />
+        <Route path="history" element={<HistoryPage />} />
         <Route path="cookies" element={<CookiesPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

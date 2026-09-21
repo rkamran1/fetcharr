@@ -95,7 +95,7 @@ frontend/src/
 ├── lib/               # shared helpers (queryClient, utils, passwords)
 ├── pages/HomePage.tsx # not one feature's
 ├── test/              # the test harness (mockApi, setup)
-└── features/<domain>/ # auth, settings, inspections, system, requests, jobs, sites
+└── features/<domain>/ # auth, settings, inspections, system, requests, jobs, sites, arr, history
     ├── api.ts         # that domain's request functions and query keys
     ├── types.ts       # its API types
     ├── components/, pages/, and colocated *.test.tsx
@@ -109,7 +109,7 @@ frontend/src/
 ## Conventions
 
 - **SQLite (§3.1):** PRAGMAs on every connection (`app/db/session.py`). Every write goes through `Database.write_session()` (one lock, one writer connection, `BEGIN IMMEDIATE`). Keep write transactions short and never hold one across a subprocess, network call or other slow `await`.
-- **Async (§3.2):** never block the event loop. Blocking file I/O, hashing and directory scans go through `asyncio.to_thread` (or a sync FastAPI handler). No `time.sleep`, `requests`, sync `httpx.Client`, `subprocess.run`/`Popen` or sync DB sessions in async code. Ruff's `ASYNC` rules enforce it; fix violations, never suppress them. Tests run with asyncio debug mode and fail on any callback over 100 ms (`backend/tests/loop_guard.py`); one-off construction inside an async fixture (building the app, migrating the database) gets a 1 s budget instead, because that is startup work rather than the app blocking its own loop.
+- **Async (§3.2):** never block the event loop. Blocking file I/O, hashing and directory scans go through `asyncio.to_thread` (or a sync FastAPI handler). No `time.sleep`, `requests`, sync `httpx.Client`, `subprocess.run`/`Popen` or sync DB sessions in async code. Ruff's `ASYNC` rules enforce it; fix violations, never suppress them. Tests run with asyncio debug mode and fail on any callback over 100 ms (`backend/tests/loop_guard.py`); one-off construction inside an async fixture (building the app, migrating the database) gets a 1 s budget instead, because that is startup work rather than the app blocking its own loop. The guard `gc.freeze()`s everything alive after collection, so a full garbage collection landing mid-test doesn't walk pytest's own objects and count as the app blocking.
 - **Pipeline (§6.1):** a single process (`uvicorn --workers 1`, set in the entrypoint), four checkpointed steps, each safe to re-run. No workflow engine or task-queue library.
 - **Retries:** only `tenacity.AsyncRetrying` with explicit retryable exception types and `reraise=True`. No hand-written retry loops. Tests use `wait_none()`.
 - **Subprocesses:** yt-dlp/ffmpeg always as argv lists (`asyncio.create_subprocess_exec`), never a shell. Only allow-listed yt-dlp options.
@@ -118,5 +118,6 @@ frontend/src/
 - **Secrets:** cookies and arr API keys are Fernet-encrypted at rest with the key from `SECRET_KEY`/`SECRET_KEY_FILE` (loaded once in the lifespan onto `app.state.secret_key`), never returned by the API, never logged.
 - **Endpoints:** every non-public endpoint requires a session. Each endpoint has a test, including the unauthenticated `401` case.
 - **Migrations:** each model change gets an Alembic revision (`backend/app/db/migrations/versions/`). Applied revisions are never edited.
+- **History search (§10):** `jobs_fts` (FTS5, revision `0009`) is kept in sync by four SQLite triggers on `jobs` and `requests`, and `env.py` hides it from autogenerate. A batch-mode rebuild of `jobs` (`batch_alter_table("jobs")`) drops those triggers, so that revision must re-run `TRIGGERS` from `0009`; `tests/db/test_migrations.py::test_history_indexes_exist` fails if they are missing.
 - **Config:** each env var is in `backend/app/config.py`, `docker-compose.example.yml` and the README env table.
 - **Tests never touch the internet**, real `/web-downloads` or real Radarr/Sonarr. Use `respx`, a local HTTP server and `tmp_path`. Real-site tests are marked `@pytest.mark.network` and excluded by default.

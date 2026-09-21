@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.schemas import JobRead
 from app.ytdlp.schemas import DownloadOptions
 
@@ -101,11 +102,46 @@ class CreatedRequest(BaseModel):
 
 
 class RequestRead(BaseModel):
+    """A request with what "download again" needs to prefill its wizard (§12)."""
+
     id: str
     media_type: str
     title: str | None
+    year: int | None
+    numbering: str | None
+    radarr_movie_id: int | None
+    sonarr_series_id: int | None
+    options: dict[str, Any]
     created_at: datetime
     jobs: list[JobRead]
+
+
+#: The largest History page (§11).
+MAX_PER_PAGE = 100
+
+
+class RequestFilters(BaseModel):
+    """`GET /api/requests`: History's filters, search and page (§11, §12)."""
+
+    model_config = {"extra": "forbid", "populate_by_name": True}
+
+    type: MediaType | None = None
+    status: JobStatus | None = None
+    import_status: ImportStatus | None = None
+    site: str | None = None
+    #: Inclusive UTC calendar days on the request's creation time.
+    from_: date | None = Field(None, alias="from")
+    to: date | None = None
+    q: Annotated[str | None, Field(max_length=200)] = None
+    page: Annotated[int, Field(ge=1)] = 1
+    per_page: Annotated[int, Field(ge=1, le=MAX_PER_PAGE)] = 25
+
+
+class RequestPage(BaseModel):
+    items: list[RequestRead]
+    total: int
+    page: int
+    per_page: int
 
 
 class PreviewRequest(MediaDetails):

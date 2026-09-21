@@ -2,7 +2,10 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { InspectResult } from '@/features/inspections'
+import type { Job } from '@/features/jobs'
 import { json, mockApi, mockEventSource, renderApp, sentBodies } from '@/test/mockApi'
+
+import type { RequestRead } from '../types'
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
@@ -405,5 +408,64 @@ describe('Movie wizard', () => {
     fireEvent.click(await screen.findByRole('link', { name: /Movie/ }))
 
     expect(await screen.findByRole('heading', { name: 'Download Movie' })).toBeInTheDocument()
+  })
+})
+
+describe('Movie wizard: download again', () => {
+  function earlier(overrides: Partial<RequestRead> = {}): RequestRead {
+    return {
+      id: 'req-1',
+      media_type: 'movie',
+      title: 'Big Buck Bunny',
+      year: 2008,
+      numbering: null,
+      radarr_movie_id: 7,
+      sonarr_series_id: null,
+      options: { ...OPTIONS, quality: '720p' } as RequestRead['options'],
+      created_at: '2026-09-01T10:00:00',
+      jobs: [{ id: 'job-1', url: URL } as Job],
+      ...overrides,
+    }
+  }
+
+  it('prefills the movie, url and options from a previous request', async () => {
+    const fetchMock = mockWizard({ 'GET /api/requests/req-1': () => json(earlier()) })
+    mockEventSource()
+    renderApp('/download/movie?again=req-1&job=job-1')
+
+    // Inspected on arrival, with the Radarr movie already chosen and the path previewed.
+    expect(await screen.findByText(PATH)).toBeInTheDocument()
+    expect(screen.getByLabelText('Video URL')).toHaveValue(URL)
+    expect(screen.getByText('Big Buck Bunny (2008)')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Radarr movies' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    await screen.findByRole('heading', { name: 'Queue' })
+    expect(sentBodies(fetchMock, 'POST /api/requests')).toMatchObject([
+      {
+        media_type: 'movie',
+        media: { radarr_movie_id: 7, title: 'Big Buck Bunny', year: 2008 },
+        items: [{ inspection_id: 7 }],
+        options: { ...OPTIONS, quality: '720p' },
+      },
+    ])
+  })
+
+  it('brings a movie typed by hand back as typed', async () => {
+    const fetchMock = mockWizard({
+      'GET /api/requests/req-1': () =>
+        json(earlier({ radarr_movie_id: null, title: 'Home Movie', year: 1999 })),
+    })
+    mockEventSource()
+    renderApp('/download/movie?again=req-1&job=job-1')
+
+    expect(await screen.findByLabelText('Movie title')).toHaveValue('Home Movie')
+    expect(screen.getByLabelText('Year')).toHaveValue(1999)
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'POST /api/preview').at(-1)).toMatchObject({
+        media: { radarr_movie_id: null, title: 'Home Movie', year: 1999 },
+      }),
+    )
   })
 })

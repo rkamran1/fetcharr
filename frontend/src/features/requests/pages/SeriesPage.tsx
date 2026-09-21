@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router'
 
 import { searchSonarrSeries, sonarrSeriesQueryKey } from '@/features/arr'
 
+import { usePrefill, useDownloadAgain } from '../again'
 import Poster from '../components/Poster'
 import SeasonSection from '../components/SeasonSection'
 import { missingInSeason } from '../episodes'
@@ -18,6 +19,9 @@ export default function SeriesPage() {
   const params = useParams()
   const seriesId = Number(params.seriesId)
   const [showAll, setShowAll] = useState(false)
+  // "Download again" from History: the episode may be in Sonarr by now, so show it all.
+  const again = useDownloadAgain()
+  usePrefill(again, () => setShowAll(true))
 
   // The series list is cached both sides, so naming this series costs one request at most.
   const series = useQuery({
@@ -72,7 +76,12 @@ export default function SeriesPage() {
         <ul aria-label="Seasons" className="flex flex-col gap-2">
           {seasons.map((season) => (
             <li key={season.number}>
-              <SeasonSection season={season} media={media} showAll={showAll} />
+              <SeasonSection
+                season={season}
+                media={media}
+                showAll={showAll}
+                prefill={again?.job.season === season.number ? again : null}
+              />
             </li>
           ))}
         </ul>

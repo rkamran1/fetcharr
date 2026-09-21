@@ -36,3 +36,15 @@ class ImportNotPossible(JobError):
         super().__init__(
             409, f"Only a not-imported or errored import can be re-run; this one is {import_status}"
         )
+
+
+class FileManagedByArr(JobError):
+    """An imported file lives in the arr library now, not in fetcharr's folders (§12)."""
+
+    def __init__(self) -> None:
+        super().__init__(409, "Managed by Radarr/Sonarr now")
+
+
+class JobStillRunning(JobError):
+    def __init__(self, status_name: str) -> None:
+        super().__init__(409, f"The file of a job that is {status_name} can't be deleted yet")

@@ -6,14 +6,23 @@ import { Button } from '@/components/ui/button'
 import { jobsQueryKey, retryImport } from '../api'
 import type { Job } from '../types'
 
+type Props = {
+  job: Job
+  /** Called once Retry import has queued, so a page other than the Queue can refresh. */
+  onRetried?: () => void
+}
+
 /** ✅ / ⚠ / ❌ for the arr import, with the app's own reasons verbatim (§7.5, §12). */
-export default function ImportBadge({ job }: { job: Job }) {
+export default function ImportBadge({ job, onRetried }: Props) {
   // A TV job was sent to Sonarr; everything else that imports went to Radarr (§7.5).
   const app = job.media_type === 'tv' ? 'Sonarr' : 'Radarr'
   const queryClient = useQueryClient()
   const retry = useMutation({
     mutationFn: () => retryImport(job.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: jobsQueryKey }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: jobsQueryKey })
+      onRetried?.()
+    },
   })
 
   if (job.import_status === 'n/a' || job.import_status === 'pending') return null

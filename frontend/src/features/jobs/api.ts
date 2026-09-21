@@ -12,3 +12,5 @@ export const retryJob = (id: string) => request<Job>('POST', `/api/jobs/${id}/re
 export const retryImport = (id: string) => request<Job>('POST', `/api/jobs/${id}/import`)
 export const deleteJob = (id: string, deleteFile = false) =>
   request<void>('DELETE', `/api/jobs/${id}?delete_file=${deleteFile}`)
+/** History's "delete file": the file goes, the job stays (§12). */
+export const deleteJobFile = (id: string) => request<Job>('DELETE', `/api/jobs/${id}/file`)

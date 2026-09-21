@@ -22,7 +22,8 @@ type Props = {
 
 export default function RadarrMoviePicker({ initialQuery, value, onChange }: Props) {
   const [query, setQuery] = useState(initialQuery)
-  const [manual, setManual] = useState(false)
+  // A movie typed by hand before ("download again") comes back as typed.
+  const [manual, setManual] = useState(value !== null && value.radarr_movie_id === null)
   const [picked, setPicked] = useState<RadarrMovie | null>(null)
 
   const movies = useQuery({
@@ -112,15 +113,16 @@ export default function RadarrMoviePicker({ initialQuery, value, onChange }: Pro
         </p>
       )}
 
-      {picked ? (
+      {/* Picked here, or handed in already picked ("download again"). */}
+      {value ? (
         <div className="flex items-start gap-4">
-          <Poster url={picked.poster} className="w-20" />
+          <Poster url={picked?.poster ?? null} className="w-20" />
           <p className="text-sm">
             <span className="font-medium">
-              {picked.title}
-              {picked.year ? ` (${picked.year})` : ''}
+              {value.title}
+              {value.year ? ` (${value.year})` : ''}
             </span>
-            {picked.has_file && (
+            {picked?.has_file && (
               <span className="text-muted-foreground">
                 {' '}
                 — Radarr already has this at {picked.quality ?? 'an unknown quality'}

@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 
 import pytest
@@ -128,3 +129,8 @@ def test_a_raised_budget_still_catches_real_blocking(
 
     result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*event loop blocked: Executing*took 1.2*seconds*"])
+
+
+def test_collected_objects_are_frozen_out_of_the_collector() -> None:
+    """A gen-2 collection mid-test doesn't walk the session's own objects (M9)."""
+    assert gc.get_freeze_count() > 10_000

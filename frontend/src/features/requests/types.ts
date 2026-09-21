@@ -1,4 +1,5 @@
 import type { Numbering } from '@/features/arr'
+import type { ImportStatus, Job, JobStatus } from '@/features/jobs'
 
 export type Quality =
   | '144p'
@@ -106,3 +107,41 @@ export type PreviewRequest =
     }
 
 export type PathPreview = { path: string; exists: boolean }
+
+export type MediaType = 'other' | 'movie' | 'tv'
+
+/** A request with what "download again" needs to prefill its wizard (§12). */
+export type RequestRead = {
+  id: string
+  media_type: MediaType
+  title: string | null
+  year: number | null
+  numbering: Numbering | null
+  radarr_movie_id: number | null
+  sonarr_series_id: number | null
+  /** As stored; a request older than a field has no value for it. */
+  options: Partial<DownloadOptions>
+  created_at: string
+  jobs: Job[]
+}
+
+/** History's filters and page (§11); an unset filter is left out of the query. */
+export type RequestFilters = {
+  type?: MediaType
+  status?: JobStatus
+  import_status?: ImportStatus
+  site?: string
+  /** `YYYY-MM-DD`, inclusive, UTC. */
+  from?: string
+  to?: string
+  q?: string
+  page?: number
+  per_page?: number
+}
+
+export type RequestPage = {
+  items: RequestRead[]
+  total: number
+  page: number
+  per_page: number
+}

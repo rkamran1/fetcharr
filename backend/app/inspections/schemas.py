@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -28,6 +29,17 @@ class AutoSettings(BaseModel):
     use_aria2c: bool
 
 
+class PreviousDownload(BaseModel):
+    """An earlier finished download of the same video: "already downloaded" (§10)."""
+
+    job_id: str
+    created_at: datetime
+    media_type: str
+    #: The library path once imported, else where fetcharr left it in completed/.
+    path: str | None
+    import_status: str
+
+
 class InspectResult(BaseModel):
     inspection_id: int
     #: The site whose cookies apply to this URL, if any (§8).
@@ -50,3 +62,5 @@ class InspectResult(BaseModel):
     estimated_sizes: dict[str, int]
     stream_type: Literal["hls", "dash", "http"]
     auto: AutoSettings
+    #: Finished downloads with the same extractor and video id, newest first (§10).
+    previous_downloads: list[PreviousDownload] = []

@@ -1,5 +1,6 @@
-"""Pure helpers for the request shapes and the path preview (requirements §5, §7.2)."""
+"""Pure helpers for the request shapes, the path preview and history search (§5, §7.2, §10)."""
 
+import re
 from typing import Any
 
 from app.library.naming import quality_label
@@ -43,3 +44,18 @@ def _ceiling(quality: str) -> int | None:
     if quality in QUALITY_HEIGHTS:
         return QUALITY_HEIGHTS[quality]
     return int(quality.removesuffix("p"))
+
+
+def search_words(q: str | None) -> list[str]:
+    """The words of a history search; punctuation separates words and is dropped (§10)."""
+    return re.findall(r"\w+", q or "")
+
+
+def fts_match(q: str | None) -> str | None:
+    """An FTS5 query where every word is a quoted prefix term, ANDed; None when empty.
+
+    Only word characters survive `search_words`, so nothing the user types can become
+    FTS syntax (`OR`, `NEAR`, `-`, `:` or a column filter). `bunn` → `"bunn"*`.
+    """
+    words = search_words(q)
+    return " ".join(f'"{word}"*' for word in words) if words else None
