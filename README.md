@@ -39,6 +39,8 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `COMPLETED_DIR` | `/web-downloads/completed` | app | finished downloads, in `movies/`, `tv-shows/` and `other/`, waiting for Radarr/Sonarr to import them. |
 | `INCOMPLETE_DIR` | `/web-downloads/incomplete` | app | per-job work folders; replaced files go to `_replaced/`. Keep it on the same volume as `COMPLETED_DIR`. |
 | `MAX_CONCURRENT_DOWNLOADS` | `2` | app | how many downloads run at once. The slot is held only while yt-dlp runs. |
+| `MAX_CONCURRENT_TRANSCODES` | `1` | app | how many transcodes run at once. The slot is held only while ffmpeg runs, so downloads keep flowing behind it. |
+| `LIBVA_DRIVER_NAME` | `iHD` | app | which libva driver ffmpeg loads for QSV/VAAPI. `iHD` is the Intel one; it only matters when `/dev/dri` is passed through. |
 | `AUTO_RESUME` | `true` | app | after a restart, resume jobs from their last completed step. `false` marks them failed instead, to be retried by hand. |
 | `SECRET_KEY` | unset | app | the Fernet key that encrypts secrets at rest (arr API keys, later cookies). Unset, fetcharr generates `SECRET_KEY_FILE` on first start. |
 | `SECRET_KEY_FILE` | `/config/secret.key` | app | where that key is read from, and written (mode `0600`) when it doesn't exist yet. Keep `/config` backed up: a lost key means re-entering every stored secret. |

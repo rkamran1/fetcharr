@@ -12,6 +12,7 @@ import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import MissingMoviePicker from '../components/MissingMoviePicker'
 import RadarrMoviePicker from '../components/RadarrMoviePicker'
+import { DEFAULT_OPTIONS } from '../types'
 import type { CollisionPolicy, DownloadOptions, MovieMedia, PreviewRequest } from '../types'
 
 // The words a video title carries that a Radarr search doesn't want (§5 step 2a).
@@ -41,13 +42,7 @@ export default function MovieWizardPage() {
   const [url, setUrl] = useState('')
   const [media, setMedia] = useState<MovieMedia | null>(null)
   const [collision, setCollision] = useState<CollisionPolicy | null>(null)
-  const [options, setOptions] = useState<DownloadOptions>({
-    quality: 'best',
-    container: 'mkv',
-    fragments: 'auto',
-    use_aria2c: 'auto',
-    retries: 5,
-  })
+  const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
 
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id

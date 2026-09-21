@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { MIN_PASSWORD_LENGTH, passwordProblem } from '@/lib/passwords'
 
 import ArrSettings from '../components/ArrSettings'
+import TranscodeSettings from '../components/TranscodeSettings'
 
 function ChangePassword() {
   const [current, setCurrent] = useState('')
@@ -156,6 +157,7 @@ export default function SettingsPage() {
       <h1 className="text-xl font-semibold">Settings</h1>
       <ArrSettings app="radarr" />
       <ArrSettings app="sonarr" />
+      <TranscodeSettings />
       <ChangePassword />
       <ApiKeySection />
     </div>

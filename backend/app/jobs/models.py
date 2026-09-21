@@ -61,6 +61,8 @@ class Job(Base):
     probed: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     # What to do when the destination is already taken; the wizard asks first (§7.3).
     collision_policy: Mapped[str] = mapped_column(String, default=CollisionPolicy.KEEP_BOTH)
+    # True when a hardware transcode failed and x265-software finished the job (§6.1).
+    transcode_fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Which episode this is (tv only, §10). `episode` is empty for a daily series, where
     # `air_date` names it instead.

@@ -19,6 +19,7 @@ export default function ImportBadge({ job }: { job: Job }) {
   if (job.import_status === 'n/a' || job.import_status === 'pending') return null
 
   const reasons = job.import_detail?.rejections ?? []
+  const explanation = job.import_detail?.explanation
   const failure = job.import_detail?.error
   const hint = job.import_detail?.hint
 
@@ -45,6 +46,8 @@ export default function ImportBadge({ job }: { job: Job }) {
               ))}
             </ul>
           )}
+          {/* The app's own word stays above; this is what it means for this file. */}
+          {explanation && <p className="text-sm">{explanation}</p>}
           {failure && <p className="text-muted-foreground text-xs">{failure}</p>}
           {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
           {job.completed_path && (

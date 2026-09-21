@@ -14,6 +14,8 @@ services:
       # - COMPLETED_DIR=/web-downloads/completed    # default shown
       # - INCOMPLETE_DIR=/web-downloads/incomplete  # default shown
       # - MAX_CONCURRENT_DOWNLOADS=2   # default shown; fetcharr runs one process (§6.1)
+      # - MAX_CONCURRENT_TRANSCODES=1  # default shown; the slot is held only while ffmpeg runs
+      - LIBVA_DRIVER_NAME=iHD     # the Intel iGPU driver used for QSV/VAAPI transcoding
       # - AUTO_RESUME=true        # default shown; false fails interrupted jobs instead
       # Secrets at rest (cookies, arr API keys). Leave both unset and fetcharr generates
       # the key file on first start; back it up with /config or the stored keys are lost.
@@ -33,6 +35,14 @@ services:
     #   radarr: volumes: [ /path/to/web-downloads:/web-downloads ]
     #   sonarr: volumes: [ /path/to/web-downloads:/web-downloads ]
     # so the paths fetcharr hands them exist inside their containers.
+    devices:
+      # The Intel iGPU, for hardware transcoding. Leave it out and transcodes fall back to
+      # software x265; downloads are unaffected either way.
+      - /dev/dri:/dev/dri
+    group_add:
+      # The host's `render` group, or ffmpeg can't open /dev/dri/renderD128. Find it with
+      #   getent group render | cut -d: -f3
+      - "${RENDER_GID:-109}"
     ports:
       - "8686:8000"
     restart: unless-stopped

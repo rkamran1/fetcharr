@@ -25,6 +25,7 @@ from app.settings.service import SettingsService
 from app.settings.utils import load_secret_key
 from app.system import router as system_router
 from app.system.utils import PathReport, check_paths
+from app.transcode.hwcheck import HardwareStatus
 
 STATIC_DIR = Path("/app/static")
 logger = logging.getLogger("fetcharr")
@@ -47,6 +48,9 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
             check_paths, settings.completed_dir, settings.incomplete_dir
         )
         _warn_about_paths(app.state.path_report)
+        # Startup only stats the render device; the encode test runs from Settings (§13.1).
+        app.state.hardware = HardwareStatus(driver=settings.libva_driver_name)
+        await app.state.hardware.start()
         # Long-lived like the hub and the manager: one connection pool, one library
         # cache and one import lock per arr app for the whole process (§6.1).
         app.state.radarr = RadarrClient()

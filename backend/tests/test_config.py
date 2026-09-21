@@ -76,3 +76,21 @@ def test_secret_and_arr_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.radarr_api_key == "abc"
     assert settings.sonarr_url == "http://sonarr:8989"
     assert settings.sonarr_api_key == "def"
+
+
+def test_transcode_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MAX_CONCURRENT_TRANSCODES", raising=False)
+    monkeypatch.delenv("LIBVA_DRIVER_NAME", raising=False)
+
+    settings = Settings()
+
+    assert settings.max_concurrent_transcodes == 1
+    assert settings.libva_driver_name == "iHD"
+
+    monkeypatch.setenv("MAX_CONCURRENT_TRANSCODES", "2")
+    monkeypatch.setenv("LIBVA_DRIVER_NAME", "i965")
+
+    settings = Settings()
+
+    assert settings.max_concurrent_transcodes == 2
+    assert settings.libva_driver_name == "i965"

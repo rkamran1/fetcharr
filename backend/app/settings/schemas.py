@@ -12,6 +12,8 @@ class SettingsRead(BaseModel):
     sonarr_api_key_set: bool
     #: The same, for SONARR_URL/SONARR_API_KEY.
     sonarr_from_env: bool
+    #: The default quality per transcode profile; the scales differ, so it is per profile.
+    transcode_quality: dict[str, int]
 
 
 class SettingsUpdate(BaseModel):
@@ -21,3 +23,5 @@ class SettingsUpdate(BaseModel):
     radarr_api_key: str | None = None
     sonarr_url: str | None = None
     sonarr_api_key: str | None = None
+    #: The whole map, or a subset of it; unknown profiles and out-of-range values are refused.
+    transcode_quality: dict[str, int] | None = None

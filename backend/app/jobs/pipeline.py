@@ -31,12 +31,16 @@ from app.integrations.arr import (
     ArrTimeout,
     ImportPolicy,
     RadarrClient,
+    Rejection,
     SonarrClient,
 )
 from app.jobs.constants import STEPS, ImportStatus, JobStatus, Step
+from app.jobs.utils import SAMPLE, explain_rejection
 from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
 from app.library.organizer import CollisionPolicy, is_organized, organize, prune_empty_dirs
 from app.library.probe import ProbeError, probe
+from app.transcode.profiles import TranscodeProfile, marker
+from app.transcode.runner import transcode
 from app.ytdlp.command import build_argv
 from app.ytdlp.runner import (
     DOWNLOAD_WAIT,
@@ -76,12 +80,16 @@ class PipelineContext:
     incomplete_dir: Path
     cancel: asyncio.Event
     download_slot: asyncio.Semaphore
+    transcode_slot: asyncio.Semaphore
     checkpoint: Checkpoint
     set_status: SetStatus
     on_progress: Callable[[Progress], None]
     on_log: Callable[[str], None]
     on_attempt: Callable[[int], None]
     aria2c_available: bool = False
+    #: The per-profile quality resolved before the step, so no session spans ffmpeg (§3.1).
+    transcode_quality: dict[str, int] = field(default_factory=dict)
+    libva_driver: str = "iHD"
     js_runtime: JsRuntime | None = None
     last_completed_step: Step | None = None
     completed_path: Path | None = None
@@ -125,8 +133,14 @@ async def execute(ctx: PipelineContext) -> None:
                 video_path = await _download(ctx)
 
         elif step is Step.TRANSCODE:
-            # Nothing is ever requested in M5a, so the done-check always skips it (M7).
-            pass
+            # §6.1 done-check: nothing was asked for, or the marker says it already ran.
+            if ctx.options.transcode is not TranscodeProfile.OFF and not await asyncio.to_thread(
+                marker(ctx.job_dir).is_file
+            ):
+                if video_path is None:
+                    video_path = read_final_path(ctx.job_dir)
+                await _transcode(ctx, video_path)
+                continue
 
         elif step is Step.ORGANIZE:
             if video_path is None:
@@ -205,6 +219,42 @@ async def _download(ctx: PipelineContext) -> Path:
             # Only this job's leftovers, and only inside its own dir.
             await asyncio.to_thread(cleanup_partials, ctx.job_dir)
             raise
+
+
+async def _transcode(ctx: PipelineContext, video_path: Path) -> None:
+    """Re-encode in place, holding the transcode slot only for this step (§6.1)."""
+    started = perf_counter()
+    # The file on disk is the truth: it is what the rename replaces and what mp4 flags apply to.
+    container = video_path.suffix.lstrip(".") or ctx.options.container
+    duration = await _duration(video_path)
+
+    async with ctx.transcode_slot:
+        _raise_if_cancelled(ctx)
+        await ctx.set_status(JobStatus.TRANSCODING, Step.TRANSCODE)
+        fell_back = await transcode(
+            profile=ctx.options.transcode,
+            source=video_path,
+            job_dir=ctx.job_dir,
+            container=container,
+            quality=ctx.transcode_quality,
+            duration=duration,
+            cancel=ctx.cancel,
+            on_percent=lambda pct: ctx.on_progress(Progress(status="transcoding", pct=pct)),
+            on_log=ctx.on_log,
+            driver=ctx.libva_driver,
+        )
+
+    await ctx.checkpoint(
+        Step.TRANSCODE, perf_counter() - started, {"transcode_fallback_used": fell_back}
+    )
+
+
+async def _duration(video_path: Path) -> float | None:
+    """The running time the percent is measured against; without it there is just no bar."""
+    try:
+        return (await probe(video_path)).duration
+    except ProbeError:
+        return None
 
 
 async def _organize(ctx: PipelineContext, video_path: Path) -> None:
@@ -390,9 +440,33 @@ async def _import_once(
     if imported is not None:
         return ImportOutcome(ImportStatus.IMPORTED, command_id, path=imported)
     # The file is still there, so arr refused it. Its reasons are a verdict, not an error.
-    reasons = await plan.client.rejections(plan.connection, str(plan.folder))
-    ctx.on_log(f"{plan.app} did not import the file: {'; '.join(reasons) or 'no reason given'}")
-    return ImportOutcome(ImportStatus.NOT_IMPORTED, command_id, detail={"rejections": reasons})
+    rejections = await plan.client.rejections(plan.connection, str(plan.folder))
+    reasons = [rejection.reason for rejection in rejections]
+    explanation = await _explain(ctx, plan, rejections)
+    said = "; ".join(reasons) or "no reason given"
+    ctx.on_log(
+        f"{plan.app} did not import the file: {said}" + (f" — {explanation}" if explanation else "")
+    )
+    detail: dict[str, Any] = {"rejections": reasons}
+    if explanation:
+        detail["explanation"] = explanation
+    return ImportOutcome(ImportStatus.NOT_IMPORTED, command_id, detail=detail)
+
+
+async def _explain(
+    ctx: PipelineContext, plan: _ImportPlan, rejections: list[Rejection]
+) -> str | None:
+    """Put a one-word verdict in context, from what fetcharr can measure itself (§7.5)."""
+    sample = next((r for r in rejections if r.reason == SAMPLE), None)
+    if sample is None:
+        return None
+    seconds: float | None = None
+    if ctx.completed_path is not None:
+        try:
+            seconds = (await probe(ctx.completed_path)).duration
+        except ProbeError:
+            seconds = None
+    return explain_rejection(sample, plan.app, seconds)
 
 
 async def _send_command(ctx: PipelineContext, plan: _ImportPlan) -> str:

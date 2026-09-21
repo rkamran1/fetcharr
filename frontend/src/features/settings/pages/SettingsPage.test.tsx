@@ -10,6 +10,7 @@ const settings = {
   sonarr_url: null,
   sonarr_api_key_set: false,
   sonarr_from_env: false,
+  transcode_quality: { 'hevc-qsv': 24, 'hevc-vaapi': 24, 'x265-software': 23 },
 }
 
 const base = {
@@ -22,12 +23,14 @@ function type(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
 }
 
-/** The page holds one card per arr app, so every query is scoped to one of them. */
-function card(name: 'Radarr' | 'Sonarr') {
+/** The page holds one card per arr app and one for transcoding, so queries are scoped. */
+type Region = 'Radarr' | 'Sonarr' | 'Transcoding'
+
+function card(name: Region) {
   return within(screen.getByRole('region', { name }))
 }
 
-async function findCard(name: 'Radarr' | 'Sonarr') {
+async function findCard(name: Region) {
   return within(await screen.findByRole('region', { name }))
 }
 
@@ -237,5 +240,95 @@ describe('Sonarr settings (AC1)', () => {
     expect(sonarr.getByLabelText('API key')).toBeDisabled()
     expect(sonarr.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(sonarr.getByText(/SONARR_URL and SONARR_API_KEY are set/)).toBeInTheDocument()
+  })
+})
+
+describe('Transcoding settings', () => {
+  const report = {
+    device: false,
+    device_path: '/dev/dri/renderD128',
+    tested: true,
+    hevc_encode: false,
+    ok: false,
+    message: '/dev/dri/renderD128 is not present: pass the iGPU through',
+    profiles: [],
+  }
+
+  it('shows the stored quality defaults per profile', async () => {
+    mockApi(base)
+    renderApp('/settings')
+
+    const transcoding = await findCard('Transcoding')
+    await waitFor(() =>
+      expect(transcoding.getByLabelText('HEVC Intel QSV (global_quality)')).toHaveValue(24),
+    )
+    expect(transcoding.getByLabelText('HEVC VAAPI (global_quality)')).toHaveValue(24)
+    expect(transcoding.getByLabelText('x265 software (CRF)')).toHaveValue(23)
+  })
+
+  it('saves the per-profile transcode quality defaults', async () => {
+    const saved = {
+      ...settings,
+      transcode_quality: { 'hevc-qsv': 22, 'hevc-vaapi': 24, 'x265-software': 23 },
+    }
+    const fetchMock = mockApi({ ...base, 'PATCH /api/settings': () => json(saved) })
+    renderApp('/settings')
+
+    const transcoding = await findCard('Transcoding')
+    // The stored map has to be in hand first, or saving one profile would drop the others.
+    await waitFor(() =>
+      expect(transcoding.getByLabelText('x265 software (CRF)')).toHaveValue(23),
+    )
+    fireEvent.change(transcoding.getByLabelText('HEVC Intel QSV (global_quality)'), {
+      target: { value: '22' },
+    })
+    fireEvent.click(transcoding.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'PATCH /api/settings')).toEqual([
+        { transcode_quality: { 'hevc-qsv': 22, 'hevc-vaapi': 24, 'x265-software': 23 } },
+      ]),
+    )
+    expect(await transcoding.findByRole('status')).toHaveTextContent('Transcode defaults saved.')
+  })
+
+  it('runs the hardware encode test and shows the result', async () => {
+    const fetchMock = mockApi({
+      ...base,
+      'POST /api/system/transcode-test': () => json(report),
+    })
+    renderApp('/settings')
+
+    const transcoding = await findCard('Transcoding')
+    fireEvent.click(transcoding.getByRole('button', { name: 'Test hardware encode' }))
+
+    expect(await transcoding.findByRole('status')).toHaveTextContent(report.message)
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(1)
+  })
+
+  it('names each profile the hardware test tried', async () => {
+    mockApi({
+      ...base,
+      'POST /api/system/transcode-test': () =>
+        json({
+          ...report,
+          device: true,
+          ok: true,
+          message: 'hardware encode works with hevc-qsv',
+          profiles: [
+            { profile: 'hevc-qsv', ok: true, error: null },
+            { profile: 'hevc-vaapi', ok: false, error: 'no VAAPI device' },
+          ],
+        }),
+    })
+    renderApp('/settings')
+
+    const transcoding = await findCard('Transcoding')
+    fireEvent.click(transcoding.getByRole('button', { name: 'Test hardware encode' }))
+
+    expect(await transcoding.findByText('hevc-qsv: works')).toBeInTheDocument()
+    expect(transcoding.getByText('hevc-vaapi: no VAAPI device')).toBeInTheDocument()
   })
 })

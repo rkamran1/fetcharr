@@ -22,8 +22,13 @@ LABEL org.opencontainers.image.title="fetcharr" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.source="https://github.com/rkamran1/fetcharr"
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg aria2 ca-certificates tini gosu \
+# The Intel media stack for QSV/VAAPI lives in Debian's non-free component (§13.1).
+RUN sed -i 's/^Components: main$/Components: main contrib non-free non-free-firmware/' \
+      /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ffmpeg aria2 ca-certificates tini gosu \
+      intel-media-va-driver-non-free libvpl2 libmfx-gen1.2 vainfo \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deno /deno /usr/local/bin/deno
@@ -54,7 +59,8 @@ RUN chmod 0755 /entrypoint.sh /usr/local/bin/fetcharr
 
 ENV PATH="/app/.venv/bin:/opt/yt-dlp/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
-    APP_VERSION=${APP_VERSION}
+    APP_VERSION=${APP_VERSION} \
+    LIBVA_DRIVER_NAME=iHD
 
 EXPOSE 8000
 VOLUME ["/config"]

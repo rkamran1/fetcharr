@@ -69,9 +69,11 @@ if mode == "download":
     if code:
         record("end")
         sys.exit(code)
-    print('[Merger] Merging formats into "video.mkv"', flush=True)
+    # The container yt-dlp was told to remux into decides the file it leaves behind.
+    container = argv[argv.index("--remux-video") + 1] if "--remux-video" in argv else "mkv"
+    print('[Merger] Merging formats into "video.%s"' % container, flush=True)
     media = os.environ.get("FAKE_YTDLP_MEDIA")
-    output = os.path.join(job_dir, "video.mkv")
+    output = os.path.join(job_dir, "video." + container)
     if media:
         shutil.copy(media, output)
     else:

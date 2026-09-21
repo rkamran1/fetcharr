@@ -226,6 +226,45 @@ async def test_a_rejected_import_records_radarr_reasons(
     assert rejections.call_count == 1
 
 
+async def test_a_sample_rejection_is_explained_in_the_log_and_the_detail(
+    manager: JobManager,
+    settings: Settings,
+    new_job: Callable[..., Any],
+    read_job: Callable[[str], Any],
+    read_logs: Callable[[str], Any],
+    fake_ytdlp: FakeYtdlp,
+    media: dict[str, Path],
+) -> None:
+    """AC16: Radarr's bare "Sample" becomes a sentence saying why, and what to do instead."""
+    fake_ytdlp.downloads(media["hd"])  # a one-second clip
+    job_id = await new_movie_job(new_job)
+    body = [
+        {
+            "movie": {"id": MOVIE_ID, "title": TITLE, "year": YEAR, "runtime": 10},
+            "rejections": [{"reason": "Sample", "type": "permanent"}],
+        }
+    ]
+
+    async with respx.mock(base_url=RADARR_URL, assert_all_called=False) as mock:
+        mock.post("/api/v3/command").mock(side_effect=leaves_the_file)
+        poll_route(mock, "completed")
+        movie_route(mock)
+        mock.get("/api/v3/manualimport").mock(return_value=httpx.Response(200, json=body))
+        manager.wake()
+        job = await wait_for_status(read_job, job_id, *TERMINAL)
+
+    expected = (
+        "the file is 0:01 long but Big Buck Bunny runs 10 min, so Radarr takes it for a "
+        "sample or trailer, not the movie itself. Pick the full-length video, or download "
+        "clips and trailers as Other."
+    )
+    assert job.import_status == ImportStatus.NOT_IMPORTED
+    # Radarr's own word is kept verbatim; the explanation sits next to it.
+    assert job.import_detail == {"rejections": ["Sample"], "explanation": expected}
+    logs = await read_logs(job_id)
+    assert f"Radarr did not import the file: Sample — {expected}" in logs
+
+
 async def test_a_movie_without_radarr_configured_is_not_imported(
     make_manager: Callable[..., JobManager],
     settings: Settings,

@@ -89,6 +89,9 @@ const OPTIONS = {
   fragments: 'auto',
   use_aria2c: 'auto',
   retries: 5,
+  // Transcoding is opt-in, so every wizard sends it off unless it was picked (AC15).
+  transcode: 'off',
+  transcode_quality: null,
 }
 
 function mockWizard(overrides: Record<string, () => Response> = {}) {

@@ -174,6 +174,7 @@ class JobService:
             eta_s=snapshot.eta_s if snapshot else job.eta_s,
             completed_path=job.completed_path,
             file_size=job.file_size,
+            transcode_fallback_used=job.transcode_fallback_used,
             season=job.season,
             episode=job.episode,
             episode_title=job.episode_title,

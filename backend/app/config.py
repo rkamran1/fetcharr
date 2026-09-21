@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     incomplete_dir: Path = Path("/web-downloads/incomplete")
     # The download slot; held only during the download step (requirements §6.1).
     max_concurrent_downloads: int = 2
+    # The transcode slot; held only during the transcode step, so downloads keep flowing.
+    max_concurrent_transcodes: int = 1
+    # Which libva driver ffmpeg loads for QSV/VAAPI; iHD is the Intel one (§13.1).
+    libva_driver_name: str = "iHD"
     # Resume interrupted jobs from their checkpoint on boot; false fails them instead.
     auto_resume: bool = True
     # The Fernet key for secrets at rest (§8). Set it, or let the file below be generated.

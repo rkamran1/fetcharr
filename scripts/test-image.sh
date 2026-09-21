@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Checks a built fetcharr image: bundled tools, /healthz smoke test, the fetcharr CLI, PUID/PGID handling,
-# the download folders, pre-migration DB backups and that no local-only file got into the image.
+# Checks a built fetcharr image: bundled tools, the Intel media stack, /healthz smoke test, the fetcharr
+# CLI, PUID/PGID handling, the download folders, pre-migration DB backups and that no local-only file
+# got into the image.
 # Usage: scripts/test-image.sh [image]   (default: fetcharr:dev)
 set -euo pipefail
 
@@ -37,6 +38,20 @@ in_image ffprobe -version >/dev/null || fail "ffprobe"
 in_image aria2c --version >/dev/null || fail "aria2c"
 in_image deno --version >/dev/null || fail "deno"
 pass "tools: yt-dlp, ffmpeg, ffprobe, aria2c, deno"
+
+# --- intel media stack: vainfo and the iHD driver for QSV/VAAPI (§13.1) ------------
+in_image sh -c 'command -v vainfo' >/dev/null || fail "vainfo is not installed"
+in_image test -f /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so \
+  || fail "the iHD VA driver is missing"
+driver="$(in_image sh -c 'echo $LIBVA_DRIVER_NAME')"
+[ "$driver" = "iHD" ] || fail "LIBVA_DRIVER_NAME is '$driver', expected iHD"
+in_image sh -c 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -q hevc_qsv' \
+  || fail "ffmpeg has no hevc_qsv encoder"
+in_image sh -c 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -q hevc_vaapi' \
+  || fail "ffmpeg has no hevc_vaapi encoder"
+in_image sh -c 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265' \
+  || fail "ffmpeg has no libx265 encoder"
+pass "intel: vainfo, iHD driver, LIBVA_DRIVER_NAME=iHD, hevc_qsv/hevc_vaapi/libx265"
 
 # --- no-legacy: nothing local-only in the image -------------------------------
 in_image sh -c 'test ! -e /app/legacy' || fail "/app/legacy exists in the image"

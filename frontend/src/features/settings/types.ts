@@ -6,6 +6,8 @@ export type AppSettings = {
   sonarr_url: string | null
   sonarr_api_key_set: boolean
   sonarr_from_env: boolean
+  /** The default quality per transcode profile; the scales differ, so it is per profile. */
+  transcode_quality: Record<string, number>
 }
 
 export type SettingsUpdate = {
@@ -13,4 +15,5 @@ export type SettingsUpdate = {
   radarr_api_key?: string
   sonarr_url?: string
   sonarr_api_key?: string
+  transcode_quality?: Record<string, number>
 }

@@ -26,6 +26,8 @@ class JobRead(BaseModel):
     eta_s: int | None
     completed_path: str | None
     file_size: int | None
+    #: True when a hardware transcode failed and x265-software finished it (§6.1).
+    transcode_fallback_used: bool
     # Which episode this is (tv only, §10).
     season: int | None
     episode: int | None

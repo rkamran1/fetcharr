@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from app.config import Settings
 from app.main import create_app
 
-pytest_plugins = ["pytester", "tests.loop_guard", "tests.fake_ytdlp"]
+pytest_plugins = ["pytester", "tests.loop_guard", "tests.fake_ytdlp", "tests.fake_ffmpeg"]
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 BASE_URL = "http://test"

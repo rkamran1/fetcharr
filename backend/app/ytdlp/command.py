@@ -3,6 +3,7 @@
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from app.transcode.profiles import TranscodeProfile
 from app.ytdlp.formats import build_selector
 from app.ytdlp.runtime import JsRuntime
 from app.ytdlp.schemas import DownloadOptions
@@ -32,7 +33,12 @@ def build_argv(
     container = options.container
     argv = [
         "--format",
-        build_selector(options.quality, container),
+        build_selector(
+            options.quality,
+            container,
+            # Keep the decode on the GPU when the file is going to be re-encoded (§4.1).
+            prefer_gpu_decode=options.transcode is not TranscodeProfile.OFF,
+        ),
         "--merge-output-format",
         container,
         "--embed-chapters",
