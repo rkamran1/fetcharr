@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { SonarrEpisode } from '@/features/arr'
 import { InspectCard, inspect } from '@/features/inspections'
+import { CookiesChip } from '@/features/sites'
 
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import { episodeLabel } from '../episodes'
@@ -38,6 +39,7 @@ function episodeRef(episode: SonarrEpisode): EpisodeRef {
 export default function EpisodeRow({ episode, media }: Props) {
   const [url, setUrl] = useState('')
   const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
+  const [useCookies, setUseCookies] = useState(true)
   const [collision, setCollision] = useState<CollisionPolicy | null>(null)
   const [queued, setQueued] = useState(false)
 
@@ -70,6 +72,7 @@ export default function EpisodeRow({ episode, media }: Props) {
         options,
         // Nothing is in the way, so there is nothing to ask about (§7.3).
         collision_policy: preview.data?.exists ? collision! : 'keep_both',
+        use_cookies: useCookies,
       }),
     onSuccess: () => setQueued(true),
   })
@@ -77,6 +80,7 @@ export default function EpisodeRow({ episode, media }: Props) {
   const submit = (event: FormEvent) => {
     event.preventDefault()
     setCollision(null)
+    setUseCookies(true)
     inspection.mutate(url.trim())
   }
 
@@ -129,6 +133,11 @@ export default function EpisodeRow({ episode, media }: Props) {
             onChange={setOptions}
             heights={inspection.data.video_heights ?? []}
             estimatedSizes={inspection.data.estimated_sizes ?? {}}
+          />
+          <CookiesChip
+            siteKey={inspection.data.site_key ?? null}
+            useCookies={useCookies}
+            onChange={setUseCookies}
           />
 
           <p className="text-muted-foreground text-xs break-all">

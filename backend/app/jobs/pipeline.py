@@ -42,6 +42,7 @@ from app.library.probe import ProbeError, probe
 from app.transcode.profiles import TranscodeProfile, marker
 from app.transcode.runner import transcode
 from app.ytdlp.command import build_argv
+from app.ytdlp.cookies import write_private
 from app.ytdlp.runner import (
     DOWNLOAD_WAIT,
     DownloadCancelled,
@@ -62,6 +63,8 @@ IMPORT_DONE = (ImportStatus.IMPORTED, ImportStatus.NOT_IMPORTED)
 #: Retried because they pass: everything else is a verdict, not a hiccup (§6.1).
 IMPORT_RETRYABLE = (httpx.TransportError, ArrServerError, ArrTimeout)
 BAD_KEY_HINT = "check the API key in Settings"
+#: The plaintext cookies for one download; it exists only while the download step runs (§8).
+COOKIES_FILE = "cookies.txt"
 
 
 def not_configured(app: str) -> str:
@@ -103,6 +106,10 @@ class PipelineContext:
     sonarr: SonarrClient | None = None
     sonarr_connection: ArrConnection | None = None
     import_policy: ImportPolicy = field(default_factory=ImportPolicy)
+    #: The site's cookie file, decrypted before the step so no session spans yt-dlp (§8).
+    cookies: str | None = None
+    #: Told what yt-dlp left in the cookie file after a successful download (write-back).
+    on_cookies_used: Callable[[str], Awaitable[None]] | None = None
     #: Injectable so tests run the retry policy without sleeping (§6.1).
     download_wait: Any = DOWNLOAD_WAIT
     step_timings: dict[str, float] = field(default_factory=dict)
@@ -191,34 +198,56 @@ def _is_non_empty(path: Path) -> bool:
 
 async def _download(ctx: PipelineContext) -> Path:
     resolved = resolve_auto(ctx.stream_type, ctx.options, ctx.aria2c_available)
+    cookies_path = ctx.job_dir / COOKIES_FILE if ctx.cookies is not None else None
     argv = build_argv(
         ctx.url,
         ctx.options,
         resolved,
         job_dir=ctx.job_dir,
+        cookies_path=cookies_path,
         js_runtime=ctx.js_runtime,
     )
-    # The download slot is held only for this step (§6.1).
-    async with ctx.download_slot:
-        _raise_if_cancelled(ctx)
-        await ctx.set_status(JobStatus.DOWNLOADING, Step.DOWNLOAD)
-        try:
-            return await download(
-                argv,
-                job_dir=ctx.job_dir,
-                retries=ctx.options.retries,
-                cancel=ctx.cancel,
-                on_progress=ctx.on_progress,
-                on_log=ctx.on_log,
-                on_attempt=ctx.on_attempt,
-                wait=ctx.download_wait,
-            )
-        except DownloadCancelled:
-            raise
-        except Exception:
-            # Only this job's leftovers, and only inside its own dir.
-            await asyncio.to_thread(cleanup_partials, ctx.job_dir)
-            raise
+    try:
+        # The download slot is held only for this step (§6.1).
+        async with ctx.download_slot:
+            _raise_if_cancelled(ctx)
+            await ctx.set_status(JobStatus.DOWNLOADING, Step.DOWNLOAD)
+            if cookies_path is not None and ctx.cookies is not None:
+                await asyncio.to_thread(write_private, cookies_path, ctx.cookies)
+            try:
+                path = await download(
+                    argv,
+                    job_dir=ctx.job_dir,
+                    retries=ctx.options.retries,
+                    cancel=ctx.cancel,
+                    on_progress=ctx.on_progress,
+                    on_log=ctx.on_log,
+                    on_attempt=ctx.on_attempt,
+                    wait=ctx.download_wait,
+                )
+            except DownloadCancelled:
+                raise
+            except Exception:
+                # Only this job's leftovers, and only inside its own dir.
+                await asyncio.to_thread(cleanup_partials, ctx.job_dir)
+                raise
+        if cookies_path is not None and ctx.on_cookies_used is not None:
+            # yt-dlp has exited, so this write spans no subprocess (§3.1 rule 2).
+            refreshed = await asyncio.to_thread(_read_if_present, cookies_path)
+            if refreshed is not None:
+                await ctx.on_cookies_used(refreshed)
+        return path
+    finally:
+        # Success, failure or cancel: the plaintext never outlives the step (§8).
+        if cookies_path is not None:
+            await asyncio.to_thread(cookies_path.unlink, True)
+
+
+def _read_if_present(path: Path) -> str | None:
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        return None
 
 
 async def _transcode(ctx: PipelineContext, video_path: Path) -> None:

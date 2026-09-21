@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from app.ytdlp.inspect import (
     YtdlpError,
     build_inspect_argv,
     classify_error,
+    is_auth_error,
     run_json,
 )
 from tests.fake_ytdlp import FIXTURES, FakeYtdlp
@@ -111,3 +113,47 @@ async def test_timeout_kills_process_group(
             break
         await asyncio.sleep(0.1)
     assert _gone(grandchild)
+
+
+def test_argv_with_cookies() -> None:
+    url = "https://www.dailymotion.com/video/x3z49k"
+
+    assert build_inspect_argv(url, None, Path("/tmp/x/cookies.txt")) == [
+        "-J",
+        "--no-download",
+        "--no-playlist",
+        "--cookies",
+        "/tmp/x/cookies.txt",
+        url,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        ("login_required.txt", True),
+        ("members_only.txt", True),
+        ("age.txt", True),
+        ("bot_check.txt", True),
+        ("not_found.txt", False),
+        ("network.txt", False),
+        ("unsupported.txt", False),
+    ],
+)
+def test_is_auth_error(fixture: str, expected: bool) -> None:
+    error = classify_error(_stderr(fixture))
+
+    assert is_auth_error(error.kind, error.message) is expected
+
+
+def test_is_auth_error_on_http_403() -> None:
+    error = classify_error("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+
+    assert error.kind == "failed"
+    assert is_auth_error(error.kind, error.message) is True
+
+
+def test_classify_error_scrubs_cookie_values() -> None:
+    error = classify_error("ERROR: request failed, Cookie: SID=CANARY-VALUE")
+
+    assert "CANARY-VALUE" not in error.message

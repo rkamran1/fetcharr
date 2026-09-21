@@ -9,7 +9,15 @@ from app.inspections import models as inspections_models
 from app.jobs import models as jobs_models
 from app.requests import models as requests_models
 from app.settings import models as settings_models
+from app.sites import models as sites_models
 
-MODEL_MODULES = (auth_models, inspections_models, requests_models, jobs_models, settings_models)
+MODEL_MODULES = (
+    auth_models,
+    inspections_models,
+    requests_models,
+    jobs_models,
+    settings_models,
+    sites_models,
+)
 
 metadata = Base.metadata

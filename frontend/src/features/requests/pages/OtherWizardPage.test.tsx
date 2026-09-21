@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { InspectResult } from '@/features/inspections'
+import type { Site } from '@/features/sites'
 import { json, mockApi, mockEventSource, renderApp, sentBodies } from '@/test/mockApi'
 
 const base = {
@@ -13,6 +14,7 @@ const URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
 
 const result: InspectResult = {
   inspection_id: 7,
+  site_key: 'youtube',
   title: 'Big Buck Bunny',
   uploader: 'Blender',
   thumbnail: 'https://i.ytimg.com/vi/aqz-KE-bpKQ/maxresdefault.jpg',
@@ -31,6 +33,26 @@ const result: InspectResult = {
   estimated_sizes: { '2160': 1372540977 },
   stream_type: 'dash',
   auto: { fragments: 4, use_aria2c: false },
+}
+
+/** An ISO timestamp `days` from now, naive UTC like the backend's. */
+function inDays(days: number): string {
+  return new Date(Date.now() + days * 86_400_000 - 60_000).toISOString().slice(0, 19)
+}
+
+function site(overrides: Partial<Site> = {}): Site {
+  return {
+    key: 'youtube',
+    label: 'YouTube',
+    domains: ['youtube.com'],
+    builtin: true,
+    status: 'valid',
+    cookie_count: 12,
+    earliest_expiry: inDays(200),
+    last_used_at: null,
+    uploaded_at: '2026-09-01T10:00:00',
+    ...overrides,
+  }
 }
 
 const preview = { path: '/web-downloads/completed/other/Big Buck Bunny [aqz-KE-bpKQ].mkv' }
@@ -107,6 +129,87 @@ describe('Other wizard', () => {
     expect(alert).toHaveTextContent('Sign in to confirm your age.')
   })
 
+  it('links the needs-cookies state to the Cookies page', async () => {
+    mockApi({
+      ...base,
+      'POST /api/inspect': () =>
+        json(
+          { detail: 'Sign in to confirm your age.', needs_cookies: true, site_key: 'youtube' },
+          422,
+        ),
+    })
+    renderApp('/download/other')
+
+    await inspectUrl()
+
+    const link = await screen.findByRole('link', { name: 'Add cookies for youtube' })
+    expect(link).toHaveAttribute('href', '/cookies#youtube')
+  })
+
+  it('shows the cookies chip and sends use_cookies', async () => {
+    const fetchMock = mockApi({
+      ...base,
+      'POST /api/inspect': () => json(result),
+      'POST /api/preview': () => json(preview),
+      'GET /api/sites': () => json([site({ earliest_expiry: inDays(12) })]),
+      'POST /api/requests': () => json({ id: 'r1', jobs: ['j1'] }, 201),
+      'GET /api/jobs': () => json({ jobs: [] }),
+    })
+    mockEventSource()
+    renderApp('/download/other')
+
+    await inspectUrl()
+
+    const chip = await screen.findByRole('group', { name: 'Cookies' })
+    expect(chip).toHaveTextContent('Using youtube cookies (expires in 12 days)')
+    expect(within(chip).getByRole('checkbox', { name: 'Skip cookies' })).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    await screen.findByRole('heading', { name: 'Queue' })
+    expect(sentBodies(fetchMock, 'POST /api/requests')).toMatchObject([{ use_cookies: true }])
+  })
+
+  it('skip cookies sends use_cookies false', async () => {
+    const fetchMock = mockApi({
+      ...base,
+      'POST /api/inspect': () => json(result),
+      'POST /api/preview': () => json(preview),
+      'GET /api/sites': () => json([site({ status: 'flagged' })]),
+      'POST /api/requests': () => json({ id: 'r1', jobs: ['j1'] }, 201),
+      'GET /api/jobs': () => json({ jobs: [] }),
+    })
+    mockEventSource()
+    renderApp('/download/other')
+
+    await inspectUrl()
+
+    const chip = await screen.findByRole('group', { name: 'Cookies' })
+    expect(within(chip).getByRole('link', { name: 'Check Cookies' })).toHaveAttribute(
+      'href',
+      '/cookies#youtube',
+    )
+    fireEvent.click(within(chip).getByRole('checkbox', { name: 'Skip cookies' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    await screen.findByRole('heading', { name: 'Queue' })
+    expect(sentBodies(fetchMock, 'POST /api/requests')).toMatchObject([{ use_cookies: false }])
+  })
+
+  it('shows no chip when the site has no cookies', async () => {
+    mockApi({
+      ...base,
+      'POST /api/inspect': () => json(result),
+      'POST /api/preview': () => json(preview),
+      'GET /api/sites': () => json([site({ status: 'none', cookie_count: null })]),
+    })
+    renderApp('/download/other')
+
+    await inspectUrl()
+
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Cookies' })).not.toBeInTheDocument()
+  })
+
   it('previews the path and posts the chosen options', async () => {
     const fetchMock = mockApi({
       ...base,
@@ -137,6 +240,7 @@ describe('Other wizard', () => {
           transcode: 'off',
           transcode_quality: null,
         },
+        use_cookies: true,
       },
     ])
     expect(sentBodies(fetchMock, 'POST /api/preview')).toContainEqual({

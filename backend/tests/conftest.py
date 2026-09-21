@@ -232,3 +232,26 @@ def media_server(media: dict[str, Path], tmp_path: Path) -> Iterator[str]:
 class _QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature
         pass
+
+
+#: A cookie value that must never show up in a response, a log line or a job log (§8).
+CANARY = "CANARY-7f3e9d-SECRET"
+NETSCAPE_HEADER = "# Netscape HTTP Cookie File"
+#: Far enough out that the status is "valid" and the 24 h short-lived rule doesn't drop it.
+YEAR_FROM_NOW = 4_102_444_800  # 2100-01-01
+
+
+def cookie_line(
+    domain: str, name: str = "SID", value: str = CANARY, expires: int = YEAR_FROM_NOW
+) -> str:
+    return "\t".join([domain, "TRUE", "/", "TRUE", str(expires), name, value])
+
+
+def cookie_file(*lines: str) -> str:
+    return "\n".join([NETSCAPE_HEADER, "", *lines]) + "\n"
+
+
+async def upload_cookies(client: httpx.AsyncClient, key: str, text: str) -> httpx.Response:
+    response = await client.put(f"/api/sites/{key}/cookies", json={"text": text})
+    assert response.status_code == 200, response.text
+    return response

@@ -71,6 +71,12 @@ async def test_every_non_public_api_route_requires_auth(
         ("POST", "/api/arr/sonarr/test"),
         ("GET", "/api/arr/sonarr/series"),
         ("GET", "/api/arr/sonarr/series/{series_id}/episodes"),
+        # M8's endpoints.
+        ("GET", "/api/sites"),
+        ("POST", "/api/sites"),
+        ("DELETE", "/api/sites/{key}"),
+        ("PUT", "/api/sites/{key}/cookies"),
+        ("DELETE", "/api/sites/{key}/cookies"),
     ):
         assert route in checked, route
 

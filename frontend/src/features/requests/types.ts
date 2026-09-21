@@ -69,13 +69,14 @@ type Item = { inspection_id: number }
 type EpisodeItem = Item & { episode: EpisodeRef }
 
 export type CreateRequest =
-  | { media_type: 'other'; items: Item[]; options: DownloadOptions }
+  | { media_type: 'other'; items: Item[]; options: DownloadOptions; use_cookies: boolean }
   | {
       media_type: 'movie'
       media: MovieMedia
       items: Item[]
       options: DownloadOptions
       collision_policy: CollisionPolicy
+      use_cookies: boolean
     }
   | {
       media_type: 'tv'
@@ -83,6 +84,7 @@ export type CreateRequest =
       items: EpisodeItem[]
       options: DownloadOptions
       collision_policy: CollisionPolicy
+      use_cookies: boolean
     }
 
 export type CreatedRequest = { id: string; jobs: string[] }

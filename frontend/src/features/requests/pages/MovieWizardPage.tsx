@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InspectCard, inspect } from '@/features/inspections'
+import { CookiesChip } from '@/features/sites'
 
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
@@ -43,6 +44,7 @@ export default function MovieWizardPage() {
   const [media, setMedia] = useState<MovieMedia | null>(null)
   const [collision, setCollision] = useState<CollisionPolicy | null>(null)
   const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
+  const [useCookies, setUseCookies] = useState(true)
 
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id
@@ -66,6 +68,7 @@ export default function MovieWizardPage() {
         options,
         // Nothing is in the way, so there is nothing to ask about (§7.3).
         collision_policy: preview.data?.exists ? collision! : 'keep_both',
+        use_cookies: useCookies,
       }),
     onSuccess: () => navigate('/queue'),
   })
@@ -75,6 +78,7 @@ export default function MovieWizardPage() {
     // The URL tab picks its movie after inspecting; the missing tab already has one.
     if (tab === 'url') setMedia(null)
     setCollision(null)
+    setUseCookies(true)
     inspection.mutate(url.trim())
   }
 
@@ -178,6 +182,11 @@ export default function MovieWizardPage() {
               onChange={setOptions}
               heights={inspection.data.video_heights ?? []}
               estimatedSizes={inspection.data.estimated_sizes ?? {}}
+            />
+            <CookiesChip
+              siteKey={inspection.data.site_key ?? null}
+              useCookies={useCookies}
+              onChange={setUseCookies}
             />
 
             <p className="text-muted-foreground text-sm break-all">

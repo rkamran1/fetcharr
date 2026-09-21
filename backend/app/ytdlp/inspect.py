@@ -5,9 +5,11 @@ import json
 import os
 import re
 import signal
+from pathlib import Path
 from typing import Any, Literal
 
 from app.ytdlp.command import is_youtube_url
+from app.ytdlp.cookies import scrub
 from app.ytdlp.runtime import JsRuntime
 
 INSPECT_TIMEOUT_S = 60.0
@@ -31,9 +33,13 @@ class YtdlpError(Exception):
         self.message = message
 
 
-def build_inspect_argv(url: str, js_runtime: JsRuntime | None) -> list[str]:
+def build_inspect_argv(
+    url: str, js_runtime: JsRuntime | None, cookies_path: Path | None = None
+) -> list[str]:
     """The yt-dlp arguments (without the binary) for inspecting one URL."""
     argv = ["-J", "--no-download", "--no-playlist"]
+    if cookies_path is not None:
+        argv += ["--cookies", str(cookies_path)]
     # Same YouTube n-sig solver rule as the download command (build_argv).
     if is_youtube_url(url):
         argv += ["--remote-components", "ejs:github"]
@@ -43,8 +49,13 @@ def build_inspect_argv(url: str, js_runtime: JsRuntime | None) -> list[str]:
     return argv
 
 
+def is_auth_error(kind: str, message: str) -> bool:
+    """A failure that stale or missing cookies explain: sign-in, age, members-only, 403 (§8)."""
+    return kind == "needs_cookies" or "HTTP Error 403" in message
+
+
 def classify_error(stderr: str) -> YtdlpError:
-    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    lines = [scrub(line.strip()) for line in stderr.splitlines() if line.strip()]
     errors = [line for line in lines if line.startswith("ERROR:")]
     last = errors[-1] if errors else (lines[-1] if lines else "yt-dlp failed")
     message = _EXTRACTOR_PREFIX.sub("", last.removeprefix("ERROR:").strip())

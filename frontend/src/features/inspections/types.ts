@@ -2,6 +2,8 @@ export type StreamType = 'hls' | 'dash' | 'http'
 export type AudioTrack = { lang: string | null; codec: string; abr: number | null }
 export type InspectResult = {
   inspection_id: number
+  /** The site whose cookies apply to this URL, if any (§8). */
+  site_key: string | null
   title: string | null
   uploader: string | null
   thumbnail: string | null

@@ -20,6 +20,7 @@ from app.jobs.manager import JobManager
 from app.jobs.models import Job, JobLog
 from app.requests.models import Request
 from app.settings.service import SettingsService
+from app.sites.service import SitesService
 from app.ytdlp.schemas import DownloadOptions
 
 URL = "https://example.com/watch?v=abc123"
@@ -89,6 +90,7 @@ def make_manager(
             SettingsService(chosen_db, chosen_settings, secret_key),
             overrides.pop("radarr", radarr),
             overrides.pop("sonarr", sonarr),
+            overrides.pop("sites", SitesService(chosen_db, secret_key)),
             download_wait=wait_none(),
             import_policy=overrides.pop("import_policy", TEST_IMPORT_POLICY),
         )

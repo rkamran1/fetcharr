@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 
 import httpx
 import pytest
@@ -8,10 +9,11 @@ from sqlalchemy import select, update
 from app.db.base import utcnow
 from app.inspections.models import Inspection
 from app.inspections.utils import PLAYLIST_MESSAGE
+from app.sites.models import SiteCookies
 from app.ytdlp import inspect
 from app.ytdlp.inspect import build_inspect_argv
 from app.ytdlp.runtime import detect_js_runtime
-from tests.conftest import setup_account
+from tests.conftest import cookie_file, cookie_line, exists, setup_account, upload_cookies
 from tests.fake_ytdlp import FakeYtdlp
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
@@ -41,6 +43,7 @@ async def test_inspect_youtube_returns_normalised_info(
     body = response.json()
     assert set(body) == {
         "inspection_id",
+        "site_key",
         "title",
         "uploader",
         "thumbnail",
@@ -66,7 +69,11 @@ async def test_inspect_youtube_returns_normalised_info(
     assert body["stream_type"] == "dash"
     assert body["estimated_sizes"]["2160"] == 1362269481 + 10271496
     rows = await _rows(app)
-    assert [(r.id, r.url, r.site_key) for r in rows] == [(body["inspection_id"], YOUTUBE_URL, None)]
+    # M8 fills the site the URL belongs to (M4 left it empty).
+    assert body["site_key"] == "youtube"
+    assert [(r.id, r.url, r.site_key) for r in rows] == [
+        (body["inspection_id"], YOUTUBE_URL, "youtube")
+    ]
     assert rows[0].expires_at - rows[0].created_at == timedelta(minutes=30)
     assert rows[0].info["title"] == body["title"]
 
@@ -95,7 +102,11 @@ async def test_inspect_rejects_playlist(
     )
 
     assert response.status_code == 422
-    assert response.json() == {"detail": PLAYLIST_MESSAGE, "needs_cookies": False}
+    assert response.json() == {
+        "detail": PLAYLIST_MESSAGE,
+        "needs_cookies": False,
+        "site_key": None,
+    }
     assert await _rows(app) == []
 
 
@@ -118,7 +129,11 @@ async def test_inspect_unsupported_url(client: httpx.AsyncClient, fake_ytdlp: Fa
     response = await client.post("/api/inspect", json={"url": "https://example.com/"})
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Unsupported URL", "needs_cookies": False}
+    assert response.json() == {
+        "detail": "Unsupported URL",
+        "needs_cookies": False,
+        "site_key": None,
+    }
 
 
 async def test_inspect_timeout_returns_504(
@@ -196,3 +211,110 @@ async def test_inspect_rejects_bad_urls(
 
     assert response.status_code == 422
     assert fake_ytdlp.calls == []
+
+
+# ------------------------------------------------------------------ M8: cookies (§8)
+
+YOUTUBE_COOKIES = cookie_file(cookie_line(".youtube.com"))
+
+
+async def _flagged(app: FastAPI) -> bool:
+    async with app.state.db.read_session() as session:
+        row = await session.get(SiteCookies, "youtube")
+    assert row is not None
+    return row.flagged_invalid
+
+
+async def test_inspect_uses_site_cookies(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    await upload_cookies(client, "youtube", YOUTUBE_COOKIES)
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 200
+    [seen] = fake_ytdlp.cookies_seen
+    argv = fake_ytdlp.calls[0]
+    assert argv[argv.index("--cookies") + 1] == seen["path"]
+    assert seen["mode"] == 0o600
+    assert seen["text"] == YOUTUBE_COOKIES
+    assert not exists(Path(seen["path"]))
+    assert not exists(Path(seen["path"]).parent)
+    async with app.state.db.read_session() as session:
+        row = await session.get(SiteCookies, "youtube")
+    assert row is not None and row.last_used_at is not None
+
+
+async def test_inspect_deletes_cookies_after_failure(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    await upload_cookies(client, "youtube", YOUTUBE_COOKIES)
+    fake_ytdlp.fails_with("unavailable.txt")
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 422
+    [seen] = fake_ytdlp.cookies_seen
+    assert seen["mode"] == 0o600
+    assert not exists(Path(seen["path"]).parent)
+
+
+async def test_inspect_unmatched_host_gets_no_cookies(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    await upload_cookies(client, "youtube", YOUTUBE_COOKIES)
+    fake_ytdlp.returns_json("dailymotion.json")
+
+    response = await client.post("/api/inspect", json={"url": "https://example.com/v/1"})
+
+    assert response.status_code == 200
+    assert response.json()["site_key"] is None
+    assert "--cookies" not in fake_ytdlp.calls[0]
+    assert fake_ytdlp.cookies_seen == []
+
+
+async def test_inspect_auth_error_flags_site(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    await upload_cookies(client, "youtube", YOUTUBE_COOKIES)
+    fake_ytdlp.fails_with("members_only.txt")
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 422
+    assert response.json()["needs_cookies"] is True
+    assert response.json()["site_key"] == "youtube"
+    assert await _flagged(app) is True
+
+    await upload_cookies(client, "youtube", YOUTUBE_COOKIES)
+    assert await _flagged(app) is False
+
+
+async def test_inspect_other_errors_do_not_flag(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    await upload_cookies(client, "youtube", YOUTUBE_COOKIES)
+    fake_ytdlp.fails_with("not_found.txt")
+
+    await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert await _flagged(app) is False
+
+
+async def test_inspect_needs_cookies_names_the_site(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    """Without cookies, the error still says which site to add them for."""
+    await setup_account(client)
+    fake_ytdlp.fails_with("login_required.txt")
+
+    response = await client.post("/api/inspect", json={"url": "https://www.bilibili.com/video/BV1"})
+
+    assert response.json()["needs_cookies"] is True
+    assert response.json()["site_key"] == "bilibili"
+    assert "--cookies" not in fake_ytdlp.calls[0]

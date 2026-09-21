@@ -20,6 +20,7 @@ import {
   SeriesPage,
 } from '@/features/requests'
 import { SettingsPage } from '@/features/settings'
+import { CookiesPage } from '@/features/sites'
 import HomePage from '@/pages/HomePage'
 
 function Centered({ children }: { children: ReactNode }) {
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="download/tv/:seriesId" element={<SeriesPage />} />
         <Route path="download/other" element={<OtherWizardPage />} />
         <Route path="queue" element={<QueuePage />} />
+        <Route path="cookies" element={<CookiesPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

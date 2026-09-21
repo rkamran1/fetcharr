@@ -148,6 +148,15 @@ def test_domain_packages_have_expected_files() -> None:
             "exceptions.py",
             "utils.py",
         },
+        "sites": {
+            "router.py",
+            "schemas.py",
+            "service.py",
+            "models.py",
+            "dependencies.py",
+            "exceptions.py",
+            "utils.py",
+        },
         "inspections": {
             "router.py",
             "schemas.py",
