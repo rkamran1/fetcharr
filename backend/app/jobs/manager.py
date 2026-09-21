@@ -29,8 +29,10 @@ from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
 from app.library.organizer import CollisionPolicy
 from app.requests.models import Request
 from app.settings.service import SettingsService
+from app.sites.service import SiteCookiesInUse, SitesService
 from app.transcode.profiles import TranscodeProfile
 from app.transcode.runner import TranscodeCancelled
+from app.ytdlp.inspect import is_auth_error
 from app.ytdlp.runner import DOWNLOAD_WAIT, DownloadCancelled, Progress, YtDlpFatal
 from app.ytdlp.runtime import JsRuntime, detect_js_runtime
 from app.ytdlp.schemas import DownloadOptions
@@ -68,6 +70,8 @@ class _Claimed:
     episode_title: str | None
     air_date: date | None
     sonarr_episode_id: int | None
+    site_key: str | None
+    use_cookies: bool
 
     def target(self) -> Target:
         """Arr's own titles for a movie or an episode, the video's own for other (§7.2)."""
@@ -104,6 +108,7 @@ class JobManager:
         settings_service: SettingsService,
         radarr: RadarrClient,
         sonarr: SonarrClient,
+        sites: SitesService,
         *,
         download_wait: Any = DOWNLOAD_WAIT,
         import_policy: ImportPolicy | None = None,
@@ -114,6 +119,7 @@ class JobManager:
         self.settings_service = settings_service
         self.radarr = radarr
         self.sonarr = sonarr
+        self.sites = sites
         self.download_wait = download_wait
         self.import_policy = import_policy or ImportPolicy()
         self.aria2c_available = False
@@ -227,6 +233,8 @@ class JobManager:
                 episode_title=job.episode_title,
                 air_date=job.air_date,
                 sonarr_episode_id=job.sonarr_episode_id,
+                site_key=job.site_key,
+                use_cookies=job.use_cookies,
             )
         self.hub.publish(
             "job.state", {"job_id": claimed.id, "status": JobStatus.STARTING, "phase": None}
@@ -277,6 +285,9 @@ class JobManager:
         elif job.media_type == "tv":
             sonarr_connection = await self.settings_service.sonarr()
         transcode_quality = await self._transcode_quality(job.options)
+        cookies: SiteCookiesInUse | None = None
+        if job.use_cookies and job.site_key:
+            cookies = await self.sites.cookies_for_site(job.site_key)
 
         context = PipelineContext(
             job_id=job.id,
@@ -313,6 +324,8 @@ class JobManager:
             sonarr_connection=sonarr_connection,
             import_policy=self.import_policy,
             download_wait=self.download_wait,
+            cookies=cookies.text if cookies else None,
+            on_cookies_used=(lambda text: self._cookies_used(cookies, text)) if cookies else None,
         )
 
         flusher = asyncio.create_task(self._flush_logs_forever(job.id, lines))
@@ -340,12 +353,19 @@ class JobManager:
         # The log is complete before the terminal state is published, so a client that
         # sees `failed` can already read why.
         await self._flush_logs(job.id, lines)
+        if cookies is not None and failure is not None and is_auth_error(*failure):
+            # Stale or signed-out cookies are the likeliest cause: flag them (§8).
+            await self.sites.flag(cookies.site_key)
         if cancelled:
             await self._cancelled(job.id, job.job_dir)
         elif failure is not None:
             await self._finish(job.id, JobStatus.FAILED, *failure)
         else:
             await self._finish(job.id, JobStatus.COMPLETED)
+
+    async def _cookies_used(self, cookies: SiteCookiesInUse, text: str) -> None:
+        """Write back what yt-dlp refreshed; an unchanged file only updates `last_used_at`."""
+        await self.sites.used(cookies.site_key, text if text != cookies.text else None)
 
     async def _transcode_quality(self, options: DownloadOptions) -> dict[str, int]:
         """Read the stored defaults before the step runs, never while ffmpeg is going (§3.1)."""

@@ -83,6 +83,8 @@ class CreateRequest(MediaDetails):
     items: Annotated[list[RequestItem], Field(min_length=1)]
     options: DownloadOptions
     collision_policy: CollisionPolicyName = "keep_both"
+    #: Step 2's "Skip cookies" toggle: false runs without the site's cookies (§8).
+    use_cookies: bool = True
 
     @model_validator(mode="after")
     def _items_match_the_type(self) -> Self:

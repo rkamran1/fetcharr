@@ -62,7 +62,8 @@ backend/app/
 ├── system/            # domain: the startup path self-test and /api/system/status
 ├── settings/          # domain: the settings store, the Fernet helpers (utils.py) and /api/settings
 ├── arr/               # domain: /api/arr/radarr/* (the connection test and the movie picker)
-├── ytdlp/             # library: schemas (DownloadOptions), command, formats, stream, runtime, inspect, runner
+├── sites/             # domain: per-site cookie files (encrypted), their status and /api/sites
+├── ytdlp/             # library: schemas (DownloadOptions), command, formats, stream, runtime, inspect, runner, cookies
 ├── transcode/         # library: profiles (the ffmpeg argv), runner (the step), hwcheck (QSV/VAAPI)
 ├── integrations/      # library: arr.py (the Radarr and Sonarr clients, their caches and import locks)
 └── library/           # library: naming, organizer, probe
@@ -94,7 +95,7 @@ frontend/src/
 ├── lib/               # shared helpers (queryClient, utils, passwords)
 ├── pages/HomePage.tsx # not one feature's
 ├── test/              # the test harness (mockApi, setup)
-└── features/<domain>/ # auth, settings, inspections, system, requests, jobs
+└── features/<domain>/ # auth, settings, inspections, system, requests, jobs, sites
     ├── api.ts         # that domain's request functions and query keys
     ├── types.ts       # its API types
     ├── components/, pages/, and colocated *.test.tsx

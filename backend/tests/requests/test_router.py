@@ -66,12 +66,13 @@ async def signed_in(app: FastAPI, fake_ytdlp: FakeYtdlp) -> Any:
 
 @pytest.fixture
 def add_inspection(app: FastAPI) -> Callable[..., Any]:
-    async def insert(**overrides: Any) -> int:
+    async def insert(site_key: str | None = None, **overrides: Any) -> int:
         db: Database = app.state.db
         now = utcnow()
         async with db.write_session() as session:
             row = Inspection(
                 url=str(INFO["webpage_url"]),
+                site_key=site_key,
                 info={**INFO, **overrides},
                 created_at=now,
                 expires_at=now + timedelta(minutes=30),
@@ -113,6 +114,34 @@ async def test_creates_a_request_and_a_queued_job(
     assert detail.json()["jobs"][0]["url"] == INFO["webpage_url"]
     # The work folder is the job's own, under INCOMPLETE_DIR (§7.4).
     assert str(settings.incomplete_dir) in str(settings.incomplete_dir / body["jobs"][0])
+
+
+@pytest.mark.parametrize(("body", "use_cookies"), [({}, True), ({"use_cookies": False}, False)])
+async def test_create_request_records_site_and_use_cookies(
+    app: FastAPI,
+    signed_in: httpx.AsyncClient,
+    add_inspection: Callable[..., Any],
+    body: dict[str, Any],
+    use_cookies: bool,
+) -> None:
+    """The job carries its inspection's site and step 2's Skip cookies choice (§8)."""
+    inspection_id = await add_inspection(site_key="youtube")
+
+    response = await signed_in.post(
+        "/api/requests",
+        json={
+            "media_type": "other",
+            "items": [{"inspection_id": inspection_id}],
+            "options": OPTIONS,
+            **body,
+        },
+    )
+
+    assert response.status_code == 201
+    async with app.state.db.read_session() as session:
+        job = await session.get(Job, response.json()["jobs"][0])
+    assert job is not None
+    assert (job.site_key, job.use_cookies) == ("youtube", use_cookies)
 
 
 async def test_rejects_an_unknown_inspection(signed_in: httpx.AsyncClient) -> None:

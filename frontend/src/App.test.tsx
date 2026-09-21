@@ -159,6 +159,19 @@ describe('auth guard and app shell', () => {
 })
 
 describe('app shell', () => {
+  it('the shell links to Cookies', async () => {
+    mockApi({
+      'GET /api/auth/me': () => json({ username: 'owner' }),
+      'GET /healthz': health,
+      'GET /api/sites': () => json([]),
+    })
+    renderApp('/')
+
+    fireEvent.click(await screen.findByRole('link', { name: 'Cookies' }))
+
+    expect(await screen.findByRole('heading', { name: 'Cookies' })).toBeInTheDocument()
+  })
+
   it('navigates between the pages that exist', async () => {
     mockApi({ 'GET /api/auth/me': () => json({ username: 'owner' }), 'GET /healthz': health })
     renderApp('/')

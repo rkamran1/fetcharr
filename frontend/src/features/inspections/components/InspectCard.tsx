@@ -1,3 +1,5 @@
+import { Link } from 'react-router'
+
 import { ApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,11 +20,16 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`
 }
 
+type InspectErrorBody = { needs_cookies?: unknown; site_key?: unknown } | undefined
+
 function needsCookies(error: Error): boolean {
-  return (
-    error instanceof ApiError &&
-    (error.data as { needs_cookies?: unknown } | undefined)?.needs_cookies === true
-  )
+  return error instanceof ApiError && (error.data as InspectErrorBody)?.needs_cookies === true
+}
+
+/** The site to add cookies for, so the link lands on its row (§8). */
+function siteKey(error: Error): string | null {
+  const key = error instanceof ApiError ? (error.data as InspectErrorBody)?.site_key : null
+  return typeof key === 'string' ? key : null
 }
 
 /** What yt-dlp knows about one URL: loading, error, needs-cookies or the video summary. */
@@ -50,6 +57,12 @@ export default function InspectCard({ isPending, error, data }: Props) {
                 The site wants a signed-in account (sign-in, age, members-only or private
                 video). Add cookies for this site to inspect it.
               </p>
+              <Link
+                to={siteKey(error) ? `/cookies#${siteKey(error)}` : '/cookies'}
+                className="text-sm underline"
+              >
+                {siteKey(error) ? `Add cookies for ${siteKey(error)}` : 'Add cookies'}
+              </Link>
               <p className="text-muted-foreground text-xs">{error.message}</p>
             </>
           ) : (

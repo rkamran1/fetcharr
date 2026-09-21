@@ -19,6 +19,7 @@ from tenacity import (
 )
 
 from app.ytdlp.command import downgrade_fragments
+from app.ytdlp.cookies import scrub
 from app.ytdlp.inspect import classify_error
 
 PROGRESS_PREFIX = "FA_PROGRESS "
@@ -167,7 +168,8 @@ async def run_once(
     postprocessing = False
     try:
         async for raw in stdout:
-            line = raw.decode(errors="replace").rstrip()
+            # Verbose output can echo request headers; cookie values never reach a log (§8).
+            line = scrub(raw.decode(errors="replace").rstrip())
             if not line:
                 continue
             progress = parse_progress(line)

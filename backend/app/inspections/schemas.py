@@ -30,6 +30,8 @@ class AutoSettings(BaseModel):
 
 class InspectResult(BaseModel):
     inspection_id: int
+    #: The site whose cookies apply to this URL, if any (§8).
+    site_key: str | None
     title: str | None
     uploader: str | None
     thumbnail: str | None

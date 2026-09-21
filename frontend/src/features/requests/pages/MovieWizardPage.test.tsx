@@ -13,6 +13,7 @@ const URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
 
 const result: InspectResult = {
   inspection_id: 7,
+  site_key: null,
   title: 'Big Buck Bunny (Official Full Movie) [4K]',
   uploader: 'Blender',
   thumbnail: null,
@@ -145,6 +146,7 @@ describe('Movie wizard', () => {
         items: [{ inspection_id: 7 }],
         options: OPTIONS,
         collision_policy: 'keep_both',
+        use_cookies: true,
       },
     ])
     expect(sentBodies(fetchMock, 'POST /api/preview')).toContainEqual({
@@ -209,6 +211,7 @@ describe('Movie wizard', () => {
           items: [{ inspection_id: 7 }],
           options: OPTIONS,
           collision_policy: 'keep_both',
+          use_cookies: true,
         },
       ]),
     )
@@ -242,6 +245,7 @@ describe('Movie wizard', () => {
           items: [{ inspection_id: 7 }],
           options: OPTIONS,
           collision_policy: 'replace',
+          use_cookies: true,
         },
       ]),
     )
@@ -311,6 +315,7 @@ describe('Movie wizard', () => {
         items: [{ inspection_id: 7 }],
         options: OPTIONS,
         collision_policy: 'keep_both',
+        use_cookies: true,
       },
     ])
     expect(sentBodies(fetchMock, 'POST /api/preview')).toContainEqual({

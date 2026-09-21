@@ -79,6 +79,7 @@ const OPTIONS = {
 /** A 720p-only video, so the quality choices can be told apart from a guess (AC20). */
 const SMALL: InspectResult = {
   inspection_id: 9,
+  site_key: null,
   title: 'a smaller upload',
   uploader: 'Some Channel',
   thumbnail: null,
@@ -101,6 +102,7 @@ const SMALL: InspectResult = {
 
 const INSPECTION: InspectResult = {
   inspection_id: 7,
+  site_key: null,
   title: 'some show s01e02',
   uploader: 'Some Channel',
   thumbnail: null,
@@ -279,6 +281,7 @@ describe('downloading one episode (AC19)', () => {
         ],
         options: OPTIONS,
         collision_policy: 'keep_both',
+        use_cookies: true,
       },
     ])
     // Still here, with the next gap ready and the other season untouched.

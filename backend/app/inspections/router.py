@@ -23,5 +23,9 @@ async def inspect(
     except InspectError as error:
         return JSONResponse(
             status_code=error.status,
-            content={"detail": error.detail, "needs_cookies": error.needs_cookies},
+            content={
+                "detail": error.detail,
+                "needs_cookies": error.needs_cookies,
+                "site_key": error.site_key,
+            },
         )

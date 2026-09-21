@@ -50,7 +50,8 @@ class RequestService:
         self.jobs = jobs
 
     async def create(self, body: CreateRequest) -> CreatedRequest:
-        infos = [await self._inspection(item.inspection_id) for item in body.items]
+        rows = [await self._inspection_row(item.inspection_id) for item in body.items]
+        infos = [info for info, _site in rows]
         request_id = str(uuid.uuid4())
         now = utcnow()
         job_ids = [str(uuid.uuid4()) for _ in infos]
@@ -78,7 +79,7 @@ class RequestService:
             )
             # No ORM relationship between the two, so the parent row is flushed first.
             await session.flush()
-            for job_id, info, item in zip(job_ids, infos, body.items, strict=True):
+            for job_id, (info, site_key), item in zip(job_ids, rows, body.items, strict=True):
                 episode = item.episode or EpisodeRef()
                 # Each job works in its own folder and moves out only when finished (§7.4).
                 session.add(
@@ -96,6 +97,8 @@ class RequestService:
                         step_timings={},
                         sidecar_paths=[],
                         collision_policy=body.collision_policy,
+                        site_key=site_key,
+                        use_cookies=body.use_cookies,
                         season=episode.season,
                         episode=episode.number,
                         sonarr_episode_id=episode.sonarr_episode_id,
@@ -137,11 +140,16 @@ class RequestService:
         return PathPreview(path=str(path), exists=exists)
 
     async def _inspection(self, inspection_id: int) -> dict[str, Any]:
+        info, _site_key = await self._inspection_row(inspection_id)
+        return info
+
+    async def _inspection_row(self, inspection_id: int) -> tuple[dict[str, Any], str | None]:
+        """The inspection's info, and the site whose cookies its URL uses (§8)."""
         async with self.db.read_session() as session:
             row = await session.get(Inspection, inspection_id)
             if row is None:
                 raise InspectionNotFound(inspection_id)
-            return dict(row.info)
+            return dict(row.info), row.site_key
 
     def _path_for(
         self,

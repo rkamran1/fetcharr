@@ -23,6 +23,8 @@ from app.requests import router as requests_router
 from app.settings import router as settings_router
 from app.settings.service import SettingsService
 from app.settings.utils import load_secret_key
+from app.sites import router as sites_router
+from app.sites.service import SitesService
 from app.system import router as system_router
 from app.system.utils import PathReport, check_paths
 from app.transcode.hwcheck import HardwareStatus
@@ -62,6 +64,7 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
             SettingsService(app.state.db, settings, app.state.secret_key),
             app.state.radarr,
             app.state.sonarr,
+            SitesService(app.state.db, app.state.secret_key),
         )
         await app.state.manager.start()
         try:
@@ -90,6 +93,7 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     app.include_router(system_router.router, dependencies=[Depends(require_auth)])
     app.include_router(settings_router.router, dependencies=[Depends(require_auth)])
     app.include_router(arr_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(sites_router.router, dependencies=[Depends(require_auth)])
 
     @app.api_route(
         "/api/{path:path}",

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,22 @@ with open(os.environ["FAKE_YTDLP_CALLS"], "a") as calls:
 
 mode = os.environ["FAKE_YTDLP_MODE"]
 events = os.environ.get("FAKE_YTDLP_EVENTS")
+
+# What yt-dlp would see in --cookies while it runs, then its rewrite of the file on exit.
+if "--cookies" in argv:
+    cookie_path = argv[argv.index("--cookies") + 1]
+    with open(cookie_path) as handle:
+        seen = {{
+            "path": cookie_path,
+            "mode": os.stat(cookie_path).st_mode & 0o777,
+            "text": handle.read(),
+        }}
+    with open(os.environ["FAKE_YTDLP_COOKIES"], "a") as handle:
+        handle.write(json.dumps(seen) + "\\n")
+    rewrite = os.environ.get("FAKE_YTDLP_COOKIE_REWRITE")
+    if rewrite:
+        with open(cookie_path, "w") as handle:
+            handle.write(rewrite)
 
 
 def record(what):
@@ -99,10 +116,12 @@ class FakeYtdlp:
         self._monkeypatch = monkeypatch
         self._calls = root / "calls.jsonl"
         self._events = root / "events"
+        self._cookies = root / "cookies.jsonl"
         self.pids_file = root / "pids"
         monkeypatch.setenv("FAKE_YTDLP_CALLS", str(self._calls))
         monkeypatch.setenv("FAKE_YTDLP_PIDS", str(self.pids_file))
         monkeypatch.setenv("FAKE_YTDLP_EVENTS", str(self._events))
+        monkeypatch.setenv("FAKE_YTDLP_COOKIES", str(self._cookies))
         self.returns_json("youtube.json")
 
     def returns_json(self, name: str) -> None:
@@ -142,6 +161,17 @@ class FakeYtdlp:
                 self._monkeypatch.delenv(name, raising=False)
             else:
                 self._monkeypatch.setenv(name, str(value))
+
+    def rewrites_cookies(self, text: str) -> None:
+        """Replace the --cookies file with `text` before exiting, as yt-dlp's save does."""
+        self._monkeypatch.setenv("FAKE_YTDLP_COOKIE_REWRITE", text)
+
+    @property
+    def cookies_seen(self) -> list[dict[str, Any]]:
+        """Per run that got --cookies: its path, its mode and its contents at that moment."""
+        if not self._cookies.exists():
+            return []
+        return [json.loads(line) for line in self._cookies.read_text().splitlines()]
 
     @property
     def calls(self) -> list[list[str]]:
