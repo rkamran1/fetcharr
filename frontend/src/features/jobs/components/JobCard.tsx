@@ -114,6 +114,11 @@ export default function JobCard({ job }: { job: Job }) {
         {!running && job.file_size != null && (
           <p className="text-muted-foreground text-sm">{formatBytes(job.file_size)}</p>
         )}
+        {job.transcode_fallback_used && (
+          <p className="text-muted-foreground text-sm">
+            Hardware transcode unavailable — fell back to software.
+          </p>
+        )}
         {job.error_message && (
           <p role="alert" className="text-destructive text-sm">
             {job.error_message}

@@ -11,7 +11,7 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[2] / "app"
 
-LIBRARY_PACKAGES = {"ytdlp", "library", "integrations"}
+LIBRARY_PACKAGES = {"ytdlp", "library", "integrations", "transcode"}
 INFRA_PACKAGES = {"db"}
 DOMAIN_MODULES = {
     "__init__.py",

@@ -9,20 +9,13 @@ import { InspectCard, inspect } from '@/features/inspections'
 
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import { episodeLabel } from '../episodes'
+import { DEFAULT_OPTIONS } from '../types'
 import type { CollisionPolicy, DownloadOptions, EpisodeRef, PreviewRequest, TvMedia } from '../types'
 import DownloadOptionsFields from './DownloadOptionsFields'
 
 type Props = {
   episode: SonarrEpisode
   media: TvMedia
-}
-
-const DEFAULT_OPTIONS: DownloadOptions = {
-  quality: 'best',
-  container: 'mkv',
-  fragments: 'auto',
-  use_aria2c: 'auto',
-  retries: 5,
 }
 
 function episodeRef(episode: SonarrEpisode): EpisodeRef {

@@ -29,6 +29,8 @@ from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
 from app.library.organizer import CollisionPolicy
 from app.requests.models import Request
 from app.settings.service import SettingsService
+from app.transcode.profiles import TranscodeProfile
+from app.transcode.runner import TranscodeCancelled
 from app.ytdlp.runner import DOWNLOAD_WAIT, DownloadCancelled, Progress, YtDlpFatal
 from app.ytdlp.runtime import JsRuntime, detect_js_runtime
 from app.ytdlp.schemas import DownloadOptions
@@ -117,6 +119,8 @@ class JobManager:
         self.aria2c_available = False
         self.js_runtime: JsRuntime | None = None
         self._slot = asyncio.Semaphore(settings.max_concurrent_downloads)
+        # Held only during the transcode step, so a job waiting for it blocks no download.
+        self._transcode_slot = asyncio.Semaphore(settings.max_concurrent_transcodes)
         self._wake = asyncio.Event()
         self._cancels: dict[str, asyncio.Event] = {}
         self._jobs: dict[str, asyncio.Task[None]] = {}
@@ -272,6 +276,7 @@ class JobManager:
             radarr_connection = await self.settings_service.radarr()
         elif job.media_type == "tv":
             sonarr_connection = await self.settings_service.sonarr()
+        transcode_quality = await self._transcode_quality(job.options)
 
         context = PipelineContext(
             job_id=job.id,
@@ -284,6 +289,7 @@ class JobManager:
             incomplete_dir=self.settings.incomplete_dir,
             cancel=cancel,
             download_slot=self._slot,
+            transcode_slot=self._transcode_slot,
             checkpoint=lambda step, seconds, fields: self._checkpoint(
                 job.id, step, seconds, fields
             ),
@@ -292,6 +298,8 @@ class JobManager:
             on_log=on_log,
             on_attempt=on_attempt,
             aria2c_available=self.aria2c_available,
+            transcode_quality=transcode_quality,
+            libva_driver=self.settings.libva_driver_name,
             js_runtime=self.js_runtime,
             last_completed_step=job.last_completed_step,
             completed_path=job.completed_path,
@@ -313,7 +321,7 @@ class JobManager:
         try:
             await asyncio.to_thread(job.job_dir.mkdir, parents=True, exist_ok=True)
             await execute(context)
-        except DownloadCancelled:
+        except (DownloadCancelled, TranscodeCancelled):
             cancelled = True
         except asyncio.CancelledError:
             # Shutdown: leave the row as it is, restart recovery picks it up (§6.1).
@@ -338,6 +346,17 @@ class JobManager:
             await self._finish(job.id, JobStatus.FAILED, *failure)
         else:
             await self._finish(job.id, JobStatus.COMPLETED)
+
+    async def _transcode_quality(self, options: DownloadOptions) -> dict[str, int]:
+        """Read the stored defaults before the step runs, never while ffmpeg is going (§3.1)."""
+        if options.transcode is TranscodeProfile.OFF:
+            return {}
+        quality = await self.settings_service.transcode_quality()
+        if options.transcode_quality is not None:
+            # A per-download override only applies to the profile it was typed for: a QSV
+            # `global_quality` is not an x265 CRF, so the fallback keeps the stored value.
+            quality[str(options.transcode)] = options.transcode_quality
+        return quality
 
     # ------------------------------------------------------------------ writes
 

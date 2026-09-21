@@ -12,12 +12,30 @@ export type Quality =
   | 'best'
 export type Container = 'mkv' | 'mp4'
 
+/** What a download is re-encoded with; `off` (the default) only remuxes (§5 step 2d). */
+export type TranscodeProfile = 'off' | 'hevc-qsv' | 'hevc-vaapi' | 'x265-software'
+
 export type DownloadOptions = {
   quality: Quality
   container: Container
   fragments: 'auto' | number
   use_aria2c: 'auto' | boolean
   retries: number
+  /** Off unless the user picks a profile: nothing transcodes by itself. */
+  transcode: TranscodeProfile
+  /** `null` means "use the default stored in Settings for this profile" (§4.1). */
+  transcode_quality: number | null
+}
+
+/** What every wizard starts from, so transcoding is off wherever a download begins. */
+export const DEFAULT_OPTIONS: DownloadOptions = {
+  quality: 'best',
+  container: 'mkv',
+  fragments: 'auto',
+  use_aria2c: 'auto',
+  retries: 5,
+  transcode: 'off',
+  transcode_quality: null,
 }
 
 /** Step 2a: what Radarr calls this movie, and which movie it is when one was picked. */

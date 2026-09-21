@@ -20,7 +20,7 @@ def test_upgrade_head_on_fresh_db(tmp_path: Path) -> None:
     command.upgrade(_config(db_path), "head")
 
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT version_num FROM alembic_version").fetchall() == [("0006",)]
+        assert conn.execute("SELECT version_num FROM alembic_version").fetchall() == [("0007",)]
 
 
 def test_alembic_check_reports_no_pending_changes(tmp_path: Path) -> None:

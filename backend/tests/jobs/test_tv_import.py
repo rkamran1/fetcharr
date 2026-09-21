@@ -247,7 +247,14 @@ async def test_a_rejected_episode_records_sonarrs_reasons(
     assert job.status == JobStatus.COMPLETED
     assert job.import_status == ImportStatus.NOT_IMPORTED
     assert job.import_detail == {
+        # Sonarr's own words, verbatim and in order (M6 AC9)…
         "rejections": [*REJECTIONS, "Episode not found by air date"],
+        # …and, because one of them is the bare "Sample", what it means (M7 AC16). The mock
+        # Sonarr names no series runtime, so there is no length to compare against.
+        "explanation": (
+            "Sonarr takes the file for a sample: it is far shorter than the episode. "
+            "Pick the full-length video, or download clips and trailers as Other."
+        ),
     }
     assert job.imported_path is None
     # A verdict isn't an error, so it is never retried (§6.1).

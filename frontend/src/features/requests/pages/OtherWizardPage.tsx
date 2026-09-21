@@ -10,18 +10,13 @@ import { InspectCard, inspect } from '@/features/inspections'
 
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
+import { DEFAULT_OPTIONS } from '../types'
 import type { DownloadOptions, PreviewRequest } from '../types'
 
 export default function OtherWizardPage() {
   const navigate = useNavigate()
   const [url, setUrl] = useState('')
-  const [options, setOptions] = useState<DownloadOptions>({
-    quality: 'best',
-    container: 'mkv',
-    fragments: 'auto',
-    use_aria2c: 'auto',
-    retries: 5,
-  })
+  const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
 
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id

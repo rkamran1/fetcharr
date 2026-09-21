@@ -78,6 +78,19 @@ class ImportPolicy:
 
 
 @dataclass(frozen=True)
+class Rejection:
+    """One reason the app gave for leaving a file where it is, as it said it (§7.5)."""
+
+    reason: str
+    #: `permanent` means asking again gets the same answer; `temporary` might not.
+    permanent: bool
+    #: What the app expects the file to be: the movie's (or series') runtime, in minutes.
+    runtime_minutes: int | None = None
+    #: The movie or series the app matched the file to, when it matched one.
+    title: str | None = None
+
+
+@dataclass(frozen=True)
 class RadarrMovie:
     id: int
     title: str
@@ -174,18 +187,30 @@ class _ArrClient:
         body = await self._get(connection, f"command/{command_id}")
         return str(body.get("status", "")) if isinstance(body, dict) else ""
 
-    async def rejections(self, connection: ArrConnection, folder: str) -> list[str]:
+    async def rejections(self, connection: ArrConnection, folder: str) -> list[Rejection]:
         """Why the app left the files where they are, verbatim and de-duplicated (§7.5)."""
         body = await self._get(connection, "manualimport", params={"folder": folder})
         if not isinstance(body, list):
             return []
-        reasons: list[str] = []
+        found: dict[str, Rejection] = {}
         for item in body:
-            for rejection in (item or {}).get("rejections") or []:
+            item = item or {}
+            # What the app matched the file to, so a bare "Sample" can be put in context.
+            matched = item.get("movie") or item.get("series") or {}
+            runtime = matched.get("runtime") if isinstance(matched, dict) else None
+            title = matched.get("title") if isinstance(matched, dict) else None
+            for rejection in item.get("rejections") or []:
                 reason = rejection if isinstance(rejection, str) else rejection.get("reason")
-                if reason and reason not in reasons:
-                    reasons.append(str(reason))
-        return reasons
+                if not reason or str(reason) in found:
+                    continue
+                kind = None if isinstance(rejection, str) else rejection.get("type")
+                found[str(reason)] = Rejection(
+                    reason=str(reason),
+                    permanent=kind != "temporary",
+                    runtime_minutes=int(runtime) if runtime else None,
+                    title=str(title) if title else None,
+                )
+        return list(found.values())
 
     # ------------------------------------------------------------------ transport
 

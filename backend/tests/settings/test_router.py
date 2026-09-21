@@ -22,6 +22,9 @@ from tests.conftest import (
     setup_account,
 )
 
+#: §4.1's calibrated starting points, before anyone changes them in Settings.
+DEFAULT_TRANSCODE_QUALITY = {"hevc-qsv": 24, "hevc-vaapi": 24, "x265-software": 23}
+
 
 async def _rows(app: FastAPI) -> dict[str, Setting]:
     async with app.state.db.read_session() as session:
@@ -55,6 +58,7 @@ async def test_get_never_returns_the_api_key(client: httpx.AsyncClient) -> None:
         "sonarr_url": None,
         "sonarr_api_key_set": False,
         "sonarr_from_env": False,
+        "transcode_quality": DEFAULT_TRANSCODE_QUALITY,
     }
     assert RADARR_API_KEY not in json.dumps(response.json())
 
@@ -71,6 +75,7 @@ async def test_get_before_anything_is_configured(client: httpx.AsyncClient) -> N
         "sonarr_url": None,
         "sonarr_api_key_set": False,
         "sonarr_from_env": False,
+        "transcode_quality": DEFAULT_TRANSCODE_QUALITY,
     }
 
 
@@ -95,6 +100,7 @@ async def test_env_values_override_stored_ones(settings: Settings, static_dir: P
         "sonarr_url": None,
         "sonarr_api_key_set": False,
         "sonarr_from_env": False,
+        "transcode_quality": DEFAULT_TRANSCODE_QUALITY,
     }
 
 
@@ -167,3 +173,52 @@ async def test_settings_require_a_session(client: httpx.AsyncClient) -> None:
 
     assert (await client.get("/api/settings")).status_code == 401
     assert (await client.patch("/api/settings", json={"radarr_url": RADARR_URL})).status_code == 401
+
+
+# --------------------------------------------- the per-profile transcode quality (§4.1)
+
+
+async def test_transcode_quality_starts_at_the_calibrated_defaults(
+    client: httpx.AsyncClient,
+) -> None:
+    await setup_account(client)
+
+    body = (await client.get("/api/settings")).json()
+
+    assert body["transcode_quality"] == DEFAULT_TRANSCODE_QUALITY
+
+
+async def test_patching_one_profile_leaves_the_others_alone(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+
+    first = await client.patch("/api/settings", json={"transcode_quality": {"hevc-qsv": 20}})
+    second = await client.patch("/api/settings", json={"transcode_quality": {"x265-software": 26}})
+
+    assert first.status_code == 200
+    assert second.json()["transcode_quality"] == {
+        "hevc-qsv": 20,
+        "hevc-vaapi": 24,
+        "x265-software": 26,
+    }
+    assert (await client.get("/api/settings")).json()["transcode_quality"]["hevc-qsv"] == 20
+
+
+async def test_an_unknown_profile_or_a_silly_quality_is_rejected(
+    client: httpx.AsyncClient,
+) -> None:
+    """The value ends up on an ffmpeg command line, so it is checked before it is stored."""
+    await setup_account(client)
+
+    unknown = await client.patch("/api/settings", json={"transcode_quality": {"av1-qsv": 24}})
+    too_high = await client.patch("/api/settings", json={"transcode_quality": {"hevc-qsv": 99}})
+    not_a_number = await client.patch(
+        "/api/settings", json={"transcode_quality": {"hevc-qsv": "low"}}
+    )
+
+    assert unknown.status_code == 422
+    assert "not a transcode profile" in unknown.json()["detail"]
+    assert too_high.status_code == 422
+    assert not_a_number.status_code == 422
+    assert (await client.get("/api/settings")).json()["transcode_quality"] == (
+        DEFAULT_TRANSCODE_QUALITY
+    )

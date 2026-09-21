@@ -12,6 +12,7 @@ from app.config import Settings
 from app.main import create_app
 from app.system.utils import COMPLETED_SUBFOLDERS
 from tests.conftest import make_client, setup_account
+from tests.fake_ffmpeg import FakeFfmpeg
 
 
 @pytest.fixture
@@ -63,3 +64,58 @@ async def test_status_reports_a_read_only_folder(
     # The log says what to do about it, instead of leaving a bare errno (AC16).
     warnings = [record.getMessage() for record in caplog.records]
     assert any(str(blocked) in message and "COMPLETED_DIR" in message for message in warnings)
+
+
+# ------------------------------- AC11: the /dev/dri + QSV/VAAPI check in the status
+
+
+async def test_status_includes_the_transcode_report(signed_in: httpx.AsyncClient) -> None:
+    """There is no iGPU here, so it says so plainly instead of pretending (§13.1)."""
+    body = (await signed_in.get("/api/system/status")).json()
+
+    transcode = body["transcode"]
+    assert transcode["device"] is False
+    assert transcode["ok"] is False
+    # Startup only stats the device, so nothing has been encoded yet.
+    assert transcode["tested"] is False
+    assert transcode["profiles"] == []
+    assert "/dev/dri" in transcode["message"]
+
+
+async def test_transcode_test_reruns_the_check(
+    app: FastAPI, signed_in: httpx.AsyncClient, tmp_path: Path, fake_ffmpeg: FakeFfmpeg
+) -> None:
+    """The Settings button: the full self-test, and the status then shows its result."""
+    device = tmp_path / "renderD128"
+    device.write_text("")
+    app.state.hardware.device = device
+
+    response = await signed_in.post("/api/system/transcode-test")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["tested"] is True
+    assert report["ok"] is True
+    assert [check["profile"] for check in report["profiles"]] == ["hevc-qsv", "hevc-vaapi"]
+    # The report is remembered, so the status page shows it without re-running anything.
+    assert (await signed_in.get("/api/system/status")).json()["transcode"] == report
+
+
+async def test_transcode_test_reports_a_missing_device_without_running_ffmpeg(
+    signed_in: httpx.AsyncClient, fake_ffmpeg: FakeFfmpeg
+) -> None:
+    response = await signed_in.post("/api/system/transcode-test")
+
+    assert response.status_code == 200
+    assert response.json()["device"] is False
+    assert response.json()["tested"] is True
+    assert fake_ffmpeg.calls == []
+
+
+async def test_transcode_test_requires_a_session(app: FastAPI) -> None:
+    async with make_client(app) as client:
+        await setup_account(client)
+        client.cookies.clear()
+
+        assert (await client.post("/api/system/transcode-test")).status_code == 401
+        assert (await client.get("/api/system/status")).status_code == 401

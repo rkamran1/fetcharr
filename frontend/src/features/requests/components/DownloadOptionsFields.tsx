@@ -5,11 +5,20 @@ import { Input } from '@/components/ui/input'
 import { formatBytes } from '@/lib/format'
 
 import NativeSelect from './NativeSelect'
-import type { Container, DownloadOptions, Quality } from '../types'
+import type { Container, DownloadOptions, Quality, TranscodeProfile } from '../types'
 
 const QUALITIES: Quality[] = ['144p', '240p', '360p', '480p', '720p', '1080p', '1440p', '2160p']
 const FRAGMENTS = ['auto', '1', '2', '4', '8'] as const
 const ARIA2C = ['auto', 'on', 'off'] as const
+
+// Off first and selected by default: a download only ever transcodes because it was asked
+// to (§5 step 2d). `hevc-qsv` is the default *profile* once transcoding is picked (§4.1).
+const TRANSCODES: { value: TranscodeProfile; label: string }[] = [
+  { value: 'off', label: 'Off (remux only)' },
+  { value: 'hevc-qsv', label: 'HEVC Intel QSV' },
+  { value: 'hevc-vaapi', label: 'HEVC VAAPI' },
+  { value: 'x265-software', label: 'x265 software' },
+]
 
 type Props = {
   value: DownloadOptions
@@ -146,6 +155,41 @@ export default function DownloadOptionsFields({
               onChange={(e) => set('retries', Number(e.target.value))}
             />
           </div>
+        </div>
+        <div className="flex flex-col gap-4 pt-4 sm:flex-row">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${id}-transcode`}>Transcode</Label>
+            <NativeSelect
+              id={`${id}-transcode`}
+              value={value.transcode}
+              onChange={(e) => set('transcode', e.target.value as TranscodeProfile)}
+            >
+              {TRANSCODES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          {/* The quality only means something once a profile is picked, and its scale
+              depends on which one, so it is hidden until then. */}
+          {value.transcode !== 'off' && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor={`${id}-transcode-quality`}>Transcode quality</Label>
+              <Input
+                id={`${id}-transcode-quality`}
+                type="number"
+                min={1}
+                max={51}
+                className="w-40"
+                placeholder="Settings default"
+                value={value.transcode_quality ?? ''}
+                onChange={(e) =>
+                  set('transcode_quality', e.target.value === '' ? null : Number(e.target.value))
+                }
+              />
+            </div>
+          )}
         </div>
       </details>
     </>

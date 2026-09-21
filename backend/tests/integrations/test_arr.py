@@ -17,6 +17,7 @@ from app.integrations.arr import (
     ArrConnection,
     ArrServerError,
     RadarrClient,
+    Rejection,
     SonarrClient,
 )
 from tests.conftest import RADARR_API_KEY, RADARR_URL, SONARR_API_KEY, SONARR_URL
@@ -100,10 +101,34 @@ async def test_rejections_are_collected_verbatim_in_both_shapes(client: RadarrCl
     async with respx.mock(base_url=RADARR_URL) as mock:
         route = mock.get("/api/v3/manualimport").mock(return_value=httpx.Response(200, json=body))
 
-        reasons = await client.rejections(CONNECTION, "/web-downloads/completed/movies/X")
+        rejections = await client.rejections(CONNECTION, "/web-downloads/completed/movies/X")
 
-    assert reasons == ["Not an upgrade for existing movie file(s)", "Unknown movie"]
+    assert [r.reason for r in rejections] == [
+        "Not an upgrade for existing movie file(s)",
+        "Unknown movie",
+    ]
     assert route.calls[0].request.url.params["folder"] == "/web-downloads/completed/movies/X"
+
+
+async def test_rejections_carry_the_type_and_the_runtime(client: RadarrClient) -> None:
+    """AC16: what Radarr matched the file to, so a bare "Sample" can be put in context."""
+    body = [
+        {
+            "path": "/web-downloads/completed/movies/Jumper (2008)/Jumper (2008) WEBDL-480p.mkv",
+            "movie": {"id": 3, "title": "Jumper", "year": 2008, "runtime": 88},
+            "rejections": [{"reason": "Sample", "type": "permanent"}],
+        },
+        {"rejections": [{"reason": "Not enough free space", "type": "temporary"}]},
+    ]
+    async with respx.mock(base_url=RADARR_URL) as mock:
+        mock.get("/api/v3/manualimport").mock(return_value=httpx.Response(200, json=body))
+
+        rejections = await client.rejections(CONNECTION, "/web-downloads/completed/movies/X")
+
+    assert rejections == [
+        Rejection(reason="Sample", permanent=True, runtime_minutes=88, title="Jumper"),
+        Rejection(reason="Not enough free space", permanent=False),
+    ]
 
 
 async def test_the_movie_list_is_cached_per_client(client: RadarrClient) -> None:

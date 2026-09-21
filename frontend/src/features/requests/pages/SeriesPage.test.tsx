@@ -71,6 +71,9 @@ const OPTIONS = {
   fragments: 'auto',
   use_aria2c: 'auto',
   retries: 5,
+  // Transcoding is opt-in, so every wizard sends it off unless it was picked (AC15).
+  transcode: 'off',
+  transcode_quality: null,
 }
 
 /** A 720p-only video, so the quality choices can be told apart from a guess (AC20). */

@@ -134,6 +134,8 @@ describe('Other wizard', () => {
           fragments: 'auto',
           use_aria2c: 'auto',
           retries: 5,
+          transcode: 'off',
+          transcode_quality: null,
         },
       },
     ])
@@ -146,6 +148,8 @@ describe('Other wizard', () => {
         fragments: 'auto',
         use_aria2c: 'auto',
         retries: 5,
+        transcode: 'off',
+        transcode_quality: null,
       },
     })
   })
@@ -284,5 +288,91 @@ describe('Other wizard', () => {
     fireEvent.click(await screen.findByRole('link', { name: /Other/ }))
 
     expect(await screen.findByRole('heading', { name: 'Download Other' })).toBeInTheDocument()
+  })
+})
+
+describe('Other wizard transcoding', () => {
+  function mockDownload() {
+    return mockApi({
+      ...base,
+      'POST /api/inspect': () => json(result),
+      'POST /api/preview': () => json(preview),
+      'POST /api/requests': () => json({ id: 'r1', jobs: ['j1'] }, 201),
+      'GET /api/jobs': () => json({ jobs: [] }),
+    })
+  }
+
+  it('leaves transcoding off unless it is picked', async () => {
+    const fetchMock = mockDownload()
+    mockEventSource()
+    renderApp('/download/other')
+
+    await inspectUrl()
+    fireEvent.click(await screen.findByText('Advanced'))
+
+    // Off is what the control starts on, and the quality field stays out of the way.
+    expect(await screen.findByLabelText('Transcode')).toHaveValue('off')
+    expect(screen.queryByLabelText('Transcode quality')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+    await screen.findByRole('heading', { name: 'Queue' })
+    const [body] = sentBodies(fetchMock, 'POST /api/requests') as {
+      options: { transcode: string; transcode_quality: number | null }
+    }[]
+    expect(body.options.transcode).toBe('off')
+    expect(body.options.transcode_quality).toBeNull()
+  })
+
+  it('offers a transcode profile and sends it with the request', async () => {
+    const fetchMock = mockDownload()
+    mockEventSource()
+    renderApp('/download/other')
+
+    await inspectUrl()
+    fireEvent.click(await screen.findByText('Advanced'))
+    const profiles = await screen.findByLabelText('Transcode')
+    expect([...profiles.querySelectorAll('option')].map((o) => o.value)).toEqual([
+      'off',
+      'hevc-qsv',
+      'hevc-vaapi',
+      'x265-software',
+    ])
+
+    fireEvent.change(profiles, { target: { value: 'hevc-qsv' } })
+    fireEvent.change(await screen.findByLabelText('Transcode quality'), {
+      target: { value: '22' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    await screen.findByRole('heading', { name: 'Queue' })
+    const [body] = sentBodies(fetchMock, 'POST /api/requests') as {
+      options: { transcode: string; transcode_quality: number | null }
+    }[]
+    expect(body.options.transcode).toBe('hevc-qsv')
+    expect(body.options.transcode_quality).toBe(22)
+  })
+
+  it('leaves the quality empty so the Settings default is used', async () => {
+    const fetchMock = mockDownload()
+    mockEventSource()
+    renderApp('/download/other')
+
+    await inspectUrl()
+    fireEvent.click(await screen.findByText('Advanced'))
+    fireEvent.change(await screen.findByLabelText('Transcode'), {
+      target: { value: 'x265-software' },
+    })
+
+    expect(await screen.findByLabelText('Transcode quality')).toHaveAttribute(
+      'placeholder',
+      'Settings default',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+    await screen.findByRole('heading', { name: 'Queue' })
+    const [body] = sentBodies(fetchMock, 'POST /api/requests') as {
+      options: { transcode: string; transcode_quality: number | null }
+    }[]
+    expect(body.options.transcode).toBe('x265-software')
+    expect(body.options.transcode_quality).toBeNull()
   })
 })

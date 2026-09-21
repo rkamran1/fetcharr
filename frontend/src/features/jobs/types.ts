@@ -13,7 +13,13 @@ export type JobStatus =
 export type ImportStatus = 'n/a' | 'pending' | 'imported' | 'not_imported' | 'error'
 
 /** Radarr's own words: why it refused, or what went wrong asking it (§7.5). */
-export type ImportDetail = { rejections?: string[]; error?: string; hint?: string }
+export type ImportDetail = {
+  rejections?: string[]
+  /** What a one-word rejection like "Sample" means for this file, measured by fetcharr. */
+  explanation?: string
+  error?: string
+  hint?: string
+}
 
 export type Job = {
   id: string
@@ -35,6 +41,8 @@ export type Job = {
   eta_s: number | null
   completed_path: string | null
   file_size: number | null
+  /** True when a hardware transcode failed and x265 software finished it (§6.1). */
+  transcode_fallback_used: boolean
   /** Which episode this is (tv only). */
   season: number | null
   episode: number | null

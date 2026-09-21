@@ -28,6 +28,7 @@ const job: Job = {
   eta_s: 18,
   completed_path: null,
   file_size: null,
+  transcode_fallback_used: false,
   season: null,
   episode: null,
   episode_title: null,
@@ -375,5 +376,111 @@ describe('a TV request in the queue (AC12)', () => {
 
     await screen.findByText('Big Buck Bunny')
     expect(screen.queryByRole('heading', { level: 2, name: /\d\/\d/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('QueuePage transcoding', () => {
+  const transcoding: Job = {
+    ...job,
+    status: 'transcoding',
+    phase: 'transcode',
+    progress_pct: 42,
+    // A transcode has no download speed or ETA to show.
+    speed_bps: null,
+    eta_s: null,
+    downloaded_bytes: null,
+  }
+
+  it('shows the transcode percent while transcoding', async () => {
+    mockQueue([transcoding])
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('Transcoding')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '42',
+    )
+  })
+
+  it('follows the transcode percent from the event stream', async () => {
+    mockQueue([transcoding])
+    const source = mockEventSource()
+    renderApp('/queue')
+    await screen.findByText('Transcoding')
+
+    source.last?.emit('job.progress', {
+      job_id: 'job-1',
+      progress_pct: 80,
+      downloaded_bytes: null,
+      total_bytes: null,
+      speed_bps: null,
+      eta_s: null,
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar', { name: 'Progress' })).toHaveAttribute(
+        'aria-valuenow',
+        '80',
+      ),
+    )
+  })
+
+  it('notes when a job fell back to software', async () => {
+    mockQueue([{ ...finished, transcode_fallback_used: true }])
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText(/fell back to software/i)).toBeInTheDocument()
+  })
+
+  it('says nothing about the fallback when it did not happen', async () => {
+    mockQueue([finished])
+    mockEventSource()
+    renderApp('/queue')
+
+    await screen.findByText('Completed')
+    expect(screen.queryByText(/fell back to software/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('QueuePage import rejections (AC16)', () => {
+  const explanation =
+    'the file is 2:05 long but Jumper runs 88 min, so Radarr takes it for a sample or trailer, ' +
+    'not the movie itself. Pick the full-length video, or download clips and trailers as Other.'
+
+  it("explains a sample rejection under Radarr's reason", async () => {
+    mockQueue([
+      {
+        ...finished,
+        import_status: 'not_imported',
+        import_detail: { rejections: ['Sample'], explanation },
+      },
+    ])
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('⚠ Not imported')).toBeInTheDocument()
+    // Radarr's own word stays, verbatim, with what it means for this file next to it.
+    const reasons = within(screen.getByRole('list', { name: "Radarr's reasons" })).getAllByRole(
+      'listitem',
+    )
+    expect(reasons.map((item) => item.textContent)).toEqual(['Sample'])
+    expect(screen.getByText(explanation)).toBeInTheDocument()
+  })
+
+  it('adds nothing when the reason needs no explaining', async () => {
+    mockQueue([
+      {
+        ...finished,
+        import_status: 'not_imported',
+        import_detail: { rejections: ['Not an upgrade for existing movie file(s)'] },
+      },
+    ])
+    mockEventSource()
+    renderApp('/queue')
+
+    expect(await screen.findByText('⚠ Not imported')).toBeInTheDocument()
+    expect(screen.queryByText(/takes it for a sample/)).not.toBeInTheDocument()
   })
 })
