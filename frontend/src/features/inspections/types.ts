@@ -1,5 +1,15 @@
 export type StreamType = 'hls' | 'dash' | 'http'
 export type AudioTrack = { lang: string | null; codec: string; abr: number | null }
+/** An earlier finished download of the same video: "already downloaded" (§10). */
+export type PreviousDownload = {
+  job_id: string
+  created_at: string
+  media_type: 'other' | 'movie' | 'tv'
+  /** The library path once imported, else where fetcharr left it in completed/. */
+  path: string | null
+  import_status: 'n/a' | 'pending' | 'imported' | 'not_imported' | 'error'
+}
+
 export type InspectResult = {
   inspection_id: number
   /** The site whose cookies apply to this URL, if any (§8). */
@@ -22,4 +32,6 @@ export type InspectResult = {
   estimated_sizes: Record<string, number>
   stream_type: StreamType
   auto: { fragments: number; use_aria2c: boolean }
+  /** Finished downloads of this same video, newest first. */
+  previous_downloads?: PreviousDownload[]
 }

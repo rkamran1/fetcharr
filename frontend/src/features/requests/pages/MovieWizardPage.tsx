@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
+import { usePrefill, useDownloadAgain } from '../again'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import MissingMoviePicker from '../components/MissingMoviePicker'
@@ -48,6 +49,20 @@ export default function MovieWizardPage() {
 
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id
+
+  // "Download again" from History: the same movie and URL, with the old options.
+  usePrefill(useDownloadAgain(), ({ request, job, options }) => {
+    setTab('url')
+    setMedia(
+      request.title
+        ? { radarr_movie_id: request.radarr_movie_id, title: request.title, year: request.year }
+        : null,
+    )
+    setCollision(null)
+    setUrl(job.url)
+    setOptions(options)
+    inspection.mutate(job.url)
+  })
 
   const previewBody: PreviewRequest | null =
     inspectionId !== undefined && media

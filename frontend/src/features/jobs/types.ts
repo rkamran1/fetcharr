@@ -43,11 +43,16 @@ export type Job = {
   file_size: number | null
   /** True when a hardware transcode failed and x265 software finished it (§6.1). */
   transcode_fallback_used: boolean
+  /** Which site's cookies it used (§8). */
+  site_key: string | null
+  /** When History's "delete file" removed the file; the job itself stays (§12). */
+  file_deleted_at: string | null
   /** Which episode this is (tv only). */
   season: number | null
   episode: number | null
   episode_title: string | null
   air_date: string | null
+  sonarr_episode_id: number | null
   import_status: ImportStatus
   import_attempts: number
   import_detail: ImportDetail | null

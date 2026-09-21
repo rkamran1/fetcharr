@@ -54,7 +54,7 @@ def add_job(app: FastAPI, settings: Settings) -> Callable[..., Any]:
                     source_title="Big Buck Bunny",
                     status=fields.pop("status", JobStatus.QUEUED),
                     step_timings={},
-                    sidecar_paths=[],
+                    sidecar_paths=fields.pop("sidecar_paths", []),
                     job_dir=str(settings.incomplete_dir / job_id),
                     created_at=utcnow(),
                     **fields,
@@ -241,3 +241,145 @@ async def test_retry_import_rejects_an_already_imported_job(
 
 async def test_retry_import_rejects_an_unknown_job(signed_in: httpx.AsyncClient) -> None:
     assert (await signed_in.post("/api/jobs/nope/import")).status_code == 404
+
+
+# ------------------------------------------------ M9 AC6: DELETE /api/jobs/{id}/file
+
+
+def _movie_files(settings: Settings) -> tuple[Path, list[Path]]:
+    folder = settings.completed_dir / "movies" / "Big Buck Bunny (2008)"
+    folder.mkdir(parents=True)
+    video = folder / "Big Buck Bunny (2008) WEBDL-1080p.mkv"
+    sidecars = [folder / "Big Buck Bunny (2008) WEBDL-1080p.en.srt", folder / "poster.jpg"]
+    for path in (video, *sidecars):
+        path.write_bytes(b"data")
+    return video, sidecars
+
+
+async def test_delete_file_removes_the_file_and_its_sidecars(
+    signed_in: httpx.AsyncClient, settings: Settings, add_job: Callable[..., Any]
+) -> None:
+    video, sidecars = _movie_files(settings)
+    job_id = await add_job(
+        status=JobStatus.COMPLETED,
+        import_status=ImportStatus.NOT_IMPORTED,
+        completed_path=str(video),
+        sidecar_paths=[str(path) for path in sidecars],
+    )
+
+    response = await signed_in.delete(f"/api/jobs/{job_id}/file")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["file_deleted_at"] is not None
+    assert not any(exists(path) for path in (video, *sidecars))
+    # The emptied movie folder goes; the category folder stays, as after an import.
+    assert not exists(video.parent)
+    assert exists(settings.completed_dir / "movies")
+    # The record stays in History.
+    job = (await signed_in.get(f"/api/jobs/{job_id}")).json()
+    assert job["completed_path"] == str(video)
+    assert job["file_deleted_at"] == response.json()["file_deleted_at"]
+
+
+async def test_delete_file_keeps_a_folder_that_holds_other_files(
+    signed_in: httpx.AsyncClient, settings: Settings, add_job: Callable[..., Any]
+) -> None:
+    video, _sidecars = _movie_files(settings)
+    job_id = await add_job(status=JobStatus.COMPLETED, completed_path=str(video))
+
+    assert (await signed_in.delete(f"/api/jobs/{job_id}/file")).status_code == 200
+
+    assert not exists(video)
+    assert exists(video.parent)
+
+
+async def test_delete_file_of_an_imported_job_is_409(
+    signed_in: httpx.AsyncClient, settings: Settings, add_job: Callable[..., Any]
+) -> None:
+    video, _sidecars = _movie_files(settings)
+    job_id = await add_job(
+        status=JobStatus.COMPLETED,
+        import_status=ImportStatus.IMPORTED,
+        completed_path=str(video),
+    )
+
+    response = await signed_in.delete(f"/api/jobs/{job_id}/file")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Managed by Radarr/Sonarr now"
+    assert is_file(video)
+
+
+# Not `queued`: the running manager would claim it.
+@pytest.mark.parametrize(
+    "status", [JobStatus.DOWNLOADING, JobStatus.POSTPROCESSING, JobStatus.IMPORTING]
+)
+async def test_delete_file_of_a_running_job_is_409(
+    signed_in: httpx.AsyncClient, settings: Settings, add_job: Callable[..., Any], status: str
+) -> None:
+    video, _sidecars = _movie_files(settings)
+    job_id = await add_job(status=status, completed_path=str(video))
+
+    response = await signed_in.delete(f"/api/jobs/{job_id}/file")
+
+    assert response.status_code == 409
+    assert is_file(video)
+
+
+@pytest.mark.parametrize("where", ["video", "sidecar", "symlink"])
+async def test_delete_file_never_touches_a_path_outside_the_roots(
+    signed_in: httpx.AsyncClient,
+    settings: Settings,
+    tmp_path: Path,
+    add_job: Callable[..., Any],
+    where: str,
+) -> None:
+    video, sidecars = _movie_files(settings)
+    outside = tmp_path / "somewhere-else.mkv"
+    outside.write_bytes(b"precious")
+    fields: dict[str, Any] = {
+        "completed_path": str(video),
+        "sidecar_paths": [str(path) for path in sidecars],
+    }
+    if where == "video":
+        fields["completed_path"] = str(outside)
+    elif where == "sidecar":
+        fields["sidecar_paths"] = [*fields["sidecar_paths"], str(outside)]
+    else:
+        link = video.parent / "escape.srt"
+        link.symlink_to(outside)
+        fields["sidecar_paths"] = [*fields["sidecar_paths"], str(link)]
+    job_id = await add_job(status=JobStatus.COMPLETED, **fields)
+
+    response = await signed_in.delete(f"/api/jobs/{job_id}/file")
+
+    assert response.status_code == 400
+    # Refused before anything went: the outside file and fetcharr's own files all stay.
+    assert is_file(outside)
+    assert is_file(video)
+    assert all(is_file(path) for path in sidecars)
+    assert (await signed_in.get(f"/api/jobs/{job_id}")).json()["file_deleted_at"] is None
+
+
+async def test_delete_file_of_a_failed_job_clears_its_job_dir(
+    signed_in: httpx.AsyncClient, settings: Settings, add_job: Callable[..., Any]
+) -> None:
+    job_id = await add_job(status=JobStatus.FAILED)
+    job_dir = settings.incomplete_dir / job_id
+    job_dir.mkdir(parents=True)
+    (job_dir / "video.part").write_bytes(b"half")
+
+    response = await signed_in.delete(f"/api/jobs/{job_id}/file")
+
+    assert response.status_code == 200
+    assert not exists(job_dir)
+
+
+async def test_delete_file_of_an_unknown_job_is_404(signed_in: httpx.AsyncClient) -> None:
+    assert (await signed_in.delete("/api/jobs/nope/file")).status_code == 404
+
+
+async def test_delete_file_requires_session(app: FastAPI, add_job: Callable[..., Any]) -> None:
+    job_id = await add_job(status=JobStatus.COMPLETED)
+    async with make_client(app) as client:
+        assert (await client.delete(f"/api/jobs/{job_id}/file")).status_code == 401

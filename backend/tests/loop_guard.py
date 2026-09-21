@@ -19,9 +19,17 @@ jitter: two unrelated tests have failed this way, each a few tens of millisecond
 every developer machine, which is where blocking code is actually written. The trade-off
 is real and deliberate: a block between 0.1 s and 0.5 s (argon2 on the loop, say) now
 passes CI, and is caught locally instead.
+
+A full garbage collection is not the app blocking either, but it runs inside whichever
+callback happens to allocate at the time, and it walks every live object, including the
+~800 pytest keeps per collected test. At ~700 tests that walk crossed 100 ms on a busy
+machine and failed random request tests (M9). Everything alive once collection has
+finished lives for the whole session, so it is frozen out of the collector's reach: the
+budget stays exactly as strict and only measures what the test itself does.
 """
 
 import asyncio
+import gc
 import logging
 import os
 import re
@@ -47,6 +55,12 @@ def _new_event_loop() -> asyncio.AbstractEventLoop:
     loop = asyncio.new_event_loop()
     loop.slow_callback_duration = SLOW_CALLBACK_DURATION
     return loop
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Move the session's long-lived objects out of every later gen-2 collection."""
+    gc.collect()
+    gc.freeze()
 
 
 def pytest_asyncio_loop_factories(config: pytest.Config, item: pytest.Item):

@@ -8,6 +8,7 @@ import type { SonarrEpisode } from '@/features/arr'
 import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
+import { usePrefill, type Prefill } from '../again'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import { episodeLabel } from '../episodes'
 import { DEFAULT_OPTIONS } from '../types'
@@ -17,6 +18,8 @@ import DownloadOptionsFields from './DownloadOptionsFields'
 type Props = {
   episode: SonarrEpisode
   media: TvMedia
+  /** "Download again" for this episode: its old URL, inspected, with its old options. */
+  prefill?: Prefill | null
 }
 
 function episodeRef(episode: SonarrEpisode): EpisodeRef {
@@ -36,7 +39,7 @@ function episodeRef(episode: SonarrEpisode): EpisodeRef {
  * Everything here belongs to one link. Two rows in the same season are inspected
  * separately and can be downloaded at different qualities.
  */
-export default function EpisodeRow({ episode, media }: Props) {
+export default function EpisodeRow({ episode, media, prefill = null }: Props) {
   const [url, setUrl] = useState('')
   const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
   const [useCookies, setUseCookies] = useState(true)
@@ -46,6 +49,12 @@ export default function EpisodeRow({ episode, media }: Props) {
   const label = episodeLabel(episode, media.numbering === 'daily')
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id
+
+  usePrefill(prefill, ({ job, options }) => {
+    setUrl(job.url)
+    setOptions(options)
+    inspection.mutate(job.url)
+  })
 
   const previewBody: PreviewRequest | null =
     inspectionId === undefined

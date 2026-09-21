@@ -13,8 +13,10 @@ from app.db.base import utcnow
 from app.db.session import Database
 from app.inspections.exceptions import InspectError
 from app.inspections.models import Inspection
-from app.inspections.schemas import InspectResult
+from app.inspections.schemas import InspectResult, PreviousDownload
 from app.inspections.utils import normalise
+from app.jobs.constants import ImportStatus, JobStatus
+from app.jobs.models import Job
 from app.sites.service import SiteCookiesInUse, SitesService
 from app.ytdlp.cookies import write_private
 from app.ytdlp.inspect import ErrorKind, YtdlpError, build_inspect_argv, is_auth_error, run_json
@@ -50,7 +52,13 @@ class InspectionService:
                 .limit(1)
             )
         if cached is not None:
-            return InspectResult(inspection_id=cached.id, site_key=cached.site_key, **cached.info)
+            # Never cached: a download may have finished since the inspection was.
+            return InspectResult(
+                inspection_id=cached.id,
+                site_key=cached.site_key,
+                previous_downloads=await self.previous_downloads(cached.info),
+                **cached.info,
+            )
 
         # No session is open while yt-dlp runs (requirements §3.1).
         site_key = await self.sites.site_key_for(url)
@@ -79,7 +87,42 @@ class InspectionService:
             session.add(row)
             await session.flush()
             inspection_id = row.id
-        return InspectResult(inspection_id=inspection_id, site_key=site_key, **info)
+        return InspectResult(
+            inspection_id=inspection_id,
+            site_key=site_key,
+            previous_downloads=await self.previous_downloads(info),
+            **info,
+        )
+
+    async def previous_downloads(self, info: dict[str, Any]) -> list[PreviousDownload]:
+        """Finished jobs with this video's extractor and id, newest first (§10)."""
+        video_id = info.get("id")
+        if not video_id:
+            return []
+        async with self.db.read_session() as session:
+            jobs = list(
+                await session.scalars(
+                    select(Job)
+                    .where(
+                        Job.video_id == video_id,
+                        Job.extractor == info.get("extractor"),
+                        Job.status == JobStatus.COMPLETED,
+                    )
+                    .order_by(Job.created_at.desc(), Job.id)
+                )
+            )
+        return [
+            PreviousDownload(
+                job_id=job.id,
+                created_at=job.created_at,
+                media_type=job.request.media_type,
+                path=job.imported_path
+                if job.import_status == ImportStatus.IMPORTED
+                else job.completed_path,
+                import_status=job.import_status,
+            )
+            for job in jobs
+        ]
 
 
 async def _run_with_cookies(

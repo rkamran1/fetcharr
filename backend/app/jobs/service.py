@@ -10,11 +10,19 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
-from app.jobs.constants import CANCELLABLE_STATUSES, ImportStatus, JobStatus, Step
+from app.jobs.constants import (
+    CANCELLABLE_STATUSES,
+    TERMINAL_STATUSES,
+    ImportStatus,
+    JobStatus,
+    Step,
+)
 from app.jobs.exceptions import (
     CancelTooLate,
+    FileManagedByArr,
     ImportNotPossible,
     JobNotFound,
+    JobStillRunning,
     RetryNotPossible,
     UnsafePath,
 )
@@ -22,6 +30,7 @@ from app.jobs.manager import JobManager
 from app.jobs.models import Job, JobLog
 from app.jobs.schemas import JobList, JobLogRead, JobRead, LogLine
 from app.jobs.utils import is_inside
+from app.library.organizer import prune_empty_dirs
 
 #: The queue shows everything running plus the most recent finished jobs.
 LIST_LIMIT = 50
@@ -152,6 +161,38 @@ class JobService:
             await session.execute(delete(JobLog).where(JobLog.job_id == job_id))
             await session.execute(delete(Job).where(Job.id == job_id))
 
+    async def delete_file(self, job_id: str) -> JobRead:
+        """History's "delete file": remove what fetcharr still owns, keep the record (§12).
+
+        Every path is checked before anything is removed, so one path outside
+        `completed/` or the job dir refuses the whole call.
+        """
+        async with self.db.read_session() as session:
+            job = await session.get(Job, job_id)
+            if job is None:
+                raise JobNotFound(job_id)
+            if job.status not in TERMINAL_STATUSES:
+                raise JobStillRunning(job.status)
+            if job.import_status == ImportStatus.IMPORTED:
+                raise FileManagedByArr()
+            job_dir = Path(job.job_dir)
+            files = [Path(path) for path in [job.completed_path, *job.sidecar_paths] if path]
+
+        completed_dir = self.settings.completed_dir
+        for path in files:
+            if not is_inside(path, completed_dir, job_dir):
+                raise UnsafePath(str(path))
+        await asyncio.to_thread(_remove_files, files, completed_dir)
+        if is_inside(job_dir, self.settings.incomplete_dir):
+            await asyncio.to_thread(shutil.rmtree, job_dir, True)
+
+        async with self.db.write_session() as session:
+            job = await session.get(Job, job_id)
+            if job is None:
+                raise JobNotFound(job_id)
+            job.file_deleted_at = utcnow()
+            return self.read(job)
+
     def read(self, job: Job) -> JobRead:
         """The stored row with the live progress snapshot on top (§3.1 rule 5)."""
         snapshot = self.hub.snapshot(job.id)
@@ -175,10 +216,13 @@ class JobService:
             completed_path=job.completed_path,
             file_size=job.file_size,
             transcode_fallback_used=job.transcode_fallback_used,
+            site_key=job.site_key,
+            file_deleted_at=job.file_deleted_at,
             season=job.season,
             episode=job.episode,
             episode_title=job.episode_title,
             air_date=job.air_date,
+            sonarr_episode_id=job.sonarr_episode_id,
             import_status=job.import_status,
             import_attempts=job.import_attempts,
             import_detail=job.import_detail,
@@ -190,3 +234,17 @@ class JobService:
             started_at=job.started_at,
             finished_at=job.finished_at,
         )
+
+
+def _remove_files(files: list[Path], completed_dir: Path) -> None:
+    """Unlink the video and its sidecars, then the folders that emptied in completed/.
+
+    The category folder (`movies/`, `tv-shows/`, `other/`) stays, as after an import (§7.5).
+    """
+    root = completed_dir.resolve()
+    for path in files:
+        path.unlink(missing_ok=True)
+    for folder in {path.parent.resolve() for path in files}:
+        if folder.is_relative_to(root) and folder != root:
+            category = root / folder.relative_to(root).parts[0]
+            prune_empty_dirs(folder, category)

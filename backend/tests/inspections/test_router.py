@@ -1,4 +1,5 @@
-from datetime import timedelta
+import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -9,6 +10,9 @@ from sqlalchemy import select, update
 from app.db.base import utcnow
 from app.inspections.models import Inspection
 from app.inspections.utils import PLAYLIST_MESSAGE
+from app.jobs.constants import ImportStatus, JobStatus
+from app.jobs.models import Job
+from app.requests.models import Request
 from app.sites.models import SiteCookies
 from app.ytdlp import inspect
 from app.ytdlp.inspect import build_inspect_argv
@@ -62,6 +66,7 @@ async def test_inspect_youtube_returns_normalised_info(
         "estimated_sizes",
         "stream_type",
         "auto",
+        "previous_downloads",
     }
     assert body["title"] == "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film"
     assert body["video_heights"] == [2160, 1440, 1080, 720, 480, 360, 240, 144]
@@ -318,3 +323,107 @@ async def test_inspect_needs_cookies_names_the_site(
     assert response.json()["needs_cookies"] is True
     assert response.json()["site_key"] == "bilibili"
     assert "--cookies" not in fake_ytdlp.calls[0]
+
+
+# ------------------------------------------------ M9 AC5: already downloaded
+
+
+async def _add_download(app: FastAPI, created_at: datetime, **fields: object) -> str:
+    """A request and one job for the fixture's video (youtube / aqz-KE-bpKQ)."""
+    request_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    media_type = str(fields.pop("media_type", "movie"))
+    async with app.state.db.write_session() as session:
+        session.add(
+            Request(
+                id=request_id,
+                media_type=media_type,
+                title="Big Buck Bunny",
+                options={},
+                created_at=created_at,
+            )
+        )
+        await session.flush()
+        session.add(
+            Job(
+                id=job_id,
+                request_id=request_id,
+                url=YOUTUBE_URL,
+                extractor=fields.pop("extractor", "youtube"),
+                video_id=fields.pop("video_id", "aqz-KE-bpKQ"),
+                status=fields.pop("status", JobStatus.COMPLETED),
+                step_timings={},
+                sidecar_paths=[],
+                job_dir="/tmp/unused",
+                created_at=created_at,
+                **fields,
+            )
+        )
+    return job_id
+
+
+async def test_inspect_lists_previous_downloads(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    imported = await _add_download(
+        app,
+        datetime(2026, 9, 1, 10),
+        import_status=ImportStatus.IMPORTED,
+        completed_path="/web-downloads/completed/movies/BBB (2008)/BBB (2008).mkv",
+        imported_path="/movies/BBB (2008)/BBB (2008).mkv",
+    )
+    kept = await _add_download(
+        app,
+        datetime(2026, 9, 5, 10),
+        media_type="other",
+        import_status=ImportStatus.NOT_APPLICABLE,
+        completed_path="/web-downloads/completed/other/BBB [aqz-KE-bpKQ].mkv",
+    )
+    # Not downloads of this video: another extractor's id, and jobs that never finished.
+    await _add_download(app, datetime(2026, 9, 6), extractor="dailymotion")
+    await _add_download(app, datetime(2026, 9, 6), status=JobStatus.FAILED)
+    await _add_download(app, datetime(2026, 9, 6), status=JobStatus.CANCELLED)
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 200
+    assert response.json()["previous_downloads"] == [
+        {
+            "job_id": kept,
+            "created_at": "2026-09-05T10:00:00",
+            "media_type": "other",
+            "path": "/web-downloads/completed/other/BBB [aqz-KE-bpKQ].mkv",
+            "import_status": "n/a",
+        },
+        {
+            "job_id": imported,
+            "created_at": "2026-09-01T10:00:00",
+            "media_type": "movie",
+            "path": "/movies/BBB (2008)/BBB (2008).mkv",
+            "import_status": "imported",
+        },
+    ]
+
+
+async def test_inspect_of_a_new_video_has_no_previous_downloads(
+    client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+
+    response = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert response.json()["previous_downloads"] == []
+
+
+async def test_previous_downloads_are_fresh_on_a_cached_inspection(
+    app: FastAPI, client: httpx.AsyncClient, fake_ytdlp: FakeYtdlp
+) -> None:
+    await setup_account(client)
+    first = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+    job_id = await _add_download(app, datetime(2026, 9, 21), media_type="other")
+
+    second = await client.post("/api/inspect", json={"url": YOUTUBE_URL})
+
+    assert len(fake_ytdlp.calls) == 1  # served from the cache
+    assert first.json()["previous_downloads"] == []
+    assert [entry["job_id"] for entry in second.json()["previous_downloads"]] == [job_id]

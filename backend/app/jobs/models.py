@@ -66,6 +66,8 @@ class Job(Base):
     use_cookies: Mapped[bool] = mapped_column(Boolean, default=True)
     # True when a hardware transcode failed and x265-software finished the job (§6.1).
     transcode_fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Set when History's "delete file" removed it; the row stays as the record (§12).
+    file_deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     # Which episode this is (tv only, §10). `episode` is empty for a daily series, where
     # `air_date` names it instead.

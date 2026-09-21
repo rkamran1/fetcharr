@@ -28,11 +28,16 @@ class JobRead(BaseModel):
     file_size: int | None
     #: True when a hardware transcode failed and x265-software finished it (§6.1).
     transcode_fallback_used: bool
+    #: Which site's cookies it used (§8); History filters on it (§12).
+    site_key: str | None
+    #: When History's "delete file" removed the file; the row itself stays (§12).
+    file_deleted_at: datetime | None
     # Which episode this is (tv only, §10).
     season: int | None
     episode: int | None
     episode_title: str | None
     air_date: date | None
+    sonarr_episode_id: int | None
     import_status: str
     import_attempts: int
     import_detail: dict[str, Any] | None

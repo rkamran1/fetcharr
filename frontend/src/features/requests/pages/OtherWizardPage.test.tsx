@@ -2,8 +2,11 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { InspectResult } from '@/features/inspections'
+import type { Job } from '@/features/jobs'
 import type { Site } from '@/features/sites'
 import { json, mockApi, mockEventSource, renderApp, sentBodies } from '@/test/mockApi'
+
+import type { RequestRead } from '../types'
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
@@ -478,5 +481,62 @@ describe('Other wizard transcoding', () => {
     }[]
     expect(body.options.transcode).toBe('x265-software')
     expect(body.options.transcode_quality).toBeNull()
+  })
+})
+
+describe('Other wizard: download again', () => {
+  it('prefills url and options from a previous request', async () => {
+    const earlier: RequestRead = {
+      id: 'req-1',
+      media_type: 'other',
+      title: 'Big Buck Bunny',
+      year: null,
+      numbering: null,
+      radarr_movie_id: null,
+      sonarr_series_id: null,
+      // Stored before transcoding existed: the missing fields fall back to the defaults.
+      options: {
+        quality: '720p',
+        container: 'mp4',
+        fragments: 'auto',
+        use_aria2c: 'auto',
+        retries: 3,
+      },
+      created_at: '2026-09-01T10:00:00',
+      jobs: [{ id: 'job-1', url: URL } as Job],
+    }
+    const fetchMock = mockApi({
+      ...base,
+      'GET /api/requests/req-1': () => json(earlier),
+      'POST /api/inspect': () => json(result),
+      'POST /api/preview': () => json(preview),
+      'POST /api/requests': () => json({ id: 'r2', jobs: ['j2'] }, 201),
+      'GET /api/jobs': () => json({ jobs: [] }),
+    })
+    mockEventSource()
+    renderApp('/download/other?again=req-1&job=job-1')
+
+    // Inspected on arrival, with nothing typed.
+    expect(await screen.findByRole('heading', { name: 'Big Buck Bunny' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Video URL')).toHaveValue(URL)
+    expect(sentBodies(fetchMock, 'POST /api/inspect')).toEqual([{ url: URL }])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    await screen.findByRole('heading', { name: 'Queue' })
+    expect(sentBodies(fetchMock, 'POST /api/requests')).toMatchObject([
+      {
+        media_type: 'other',
+        options: {
+          quality: '720p',
+          container: 'mp4',
+          fragments: 'auto',
+          use_aria2c: 'auto',
+          retries: 3,
+          transcode: 'off',
+          transcode_quality: null,
+        },
+      },
+    ])
   })
 })

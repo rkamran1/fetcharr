@@ -1,7 +1,11 @@
 """`POST /api/requests`, `GET /api/requests/{id}` and `POST /api/preview` (requirements §11)."""
 
+import asyncio
+import sqlite3
+import time
+import uuid
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +17,7 @@ from app.config import Settings
 from app.db.base import utcnow
 from app.db.session import Database
 from app.inspections.models import Inspection
+from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.models import Job
 from app.requests.models import Request
 from tests.conftest import make_client, setup_account
@@ -561,3 +566,312 @@ async def test_a_standard_episode_without_a_number_cannot_be_named(
 
     assert response.status_code == 422
     assert "episode number" in response.text
+
+
+# ------------------------------------------------ M9: GET /api/requests (History)
+
+
+def _at(day: str) -> datetime:
+    return datetime.fromisoformat(day)
+
+
+@pytest.fixture
+def add_history(app: FastAPI, settings: Settings) -> Callable[..., Any]:
+    """A finished request and its jobs; finished, so the running manager leaves them alone."""
+
+    async def insert(
+        media_type: str, created_at: str, *jobs: dict[str, Any], **request: Any
+    ) -> str:
+        db: Database = app.state.db
+        request_id = str(uuid.uuid4())
+        async with db.write_session() as session:
+            session.add(
+                Request(
+                    id=request_id,
+                    media_type=media_type,
+                    title=request.pop("title", f"{media_type} request"),
+                    options=request.pop("options", OPTIONS),
+                    created_at=_at(created_at),
+                    **request,
+                )
+            )
+            await session.flush()
+            for fields in jobs or ({},):
+                job_id = str(uuid.uuid4())
+                session.add(
+                    Job(
+                        id=job_id,
+                        request_id=request_id,
+                        url=fields.pop("url", "https://example.com/v"),
+                        source_title=fields.pop("source_title", "a video"),
+                        status=fields.pop("status", JobStatus.COMPLETED),
+                        import_status=fields.pop("import_status", ImportStatus.NOT_APPLICABLE),
+                        step_timings={},
+                        sidecar_paths=[],
+                        job_dir=str(settings.incomplete_dir / job_id),
+                        created_at=_at(created_at),
+                        **fields,
+                    )
+                )
+        return request_id
+
+    return insert
+
+
+@pytest.fixture
+async def history(add_history: Callable[..., Any]) -> dict[str, str]:
+    return {
+        "movie": await add_history(
+            "movie",
+            "2026-09-01T12:00:00",
+            {"import_status": ImportStatus.IMPORTED, "site_key": "youtube"},
+        ),
+        "tv": await add_history(
+            "tv",
+            "2026-09-10T08:00:00",
+            {"import_status": ImportStatus.NOT_IMPORTED, "site_key": "youtube"},
+            {
+                "status": JobStatus.FAILED,
+                "import_status": ImportStatus.PENDING,
+                "site_key": "bilibili",
+            },
+        ),
+        "other": await add_history("other", "2026-09-15T23:59:59"),
+        "late": await add_history(
+            "other",
+            "2026-09-16T00:00:00",
+            {"status": JobStatus.CANCELLED, "site_key": "dailymotion"},
+        ),
+    }
+
+
+async def _ids(client: httpx.AsyncClient, query: str) -> set[str]:
+    response = await client.get(f"/api/requests?{query}")
+    assert response.status_code == 200, response.text
+    return {item["id"] for item in response.json()["items"]}
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("", {"movie", "tv", "other", "late"}),
+        ("type=movie", {"movie"}),
+        ("type=tv", {"tv"}),
+        ("type=other", {"other", "late"}),
+        ("status=failed", {"tv"}),
+        ("status=completed", {"movie", "tv", "other"}),
+        ("status=cancelled", {"late"}),
+        ("import_status=imported", {"movie"}),
+        ("import_status=not_imported", {"tv"}),
+        ("import_status=n/a", {"other", "late"}),
+        ("site=bilibili", {"tv"}),
+        ("site=youtube", {"movie", "tv"}),
+        ("from=2026-09-10", {"tv", "other", "late"}),
+        ("to=2026-09-10", {"movie", "tv"}),
+    ],
+)
+async def test_list_each_filter_narrows(
+    signed_in: httpx.AsyncClient, history: dict[str, str], query: str, expected: set[str]
+) -> None:
+    assert await _ids(signed_in, query) == {history[key] for key in expected}
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("type=tv&site=youtube", {"tv"}),
+        ("type=movie&site=bilibili", set()),
+        ("type=other&to=2026-09-15", {"other"}),
+        ("status=completed&import_status=not_imported", {"tv"}),
+        # The tv request has a failed job and a youtube job, but not a failed youtube job.
+        ("status=failed&site=youtube", set()),
+        ("status=failed&site=bilibili&type=tv&from=2026-09-01&to=2026-09-30", {"tv"}),
+    ],
+)
+async def test_list_filters_combine_with_and(
+    signed_in: httpx.AsyncClient, history: dict[str, str], query: str, expected: set[str]
+) -> None:
+    assert await _ids(signed_in, query) == {history[key] for key in expected}
+
+
+async def test_list_date_range_includes_the_whole_to_day(
+    signed_in: httpx.AsyncClient, history: dict[str, str]
+) -> None:
+    # 23:59:59 on the 15th is inside `to=2026-09-15`; midnight on the 16th is not.
+    assert await _ids(signed_in, "from=2026-09-15&to=2026-09-15") == {history["other"]}
+    assert await _ids(signed_in, "from=2026-09-16&to=2026-09-16") == {history["late"]}
+
+
+async def test_list_items_carry_all_their_jobs(
+    signed_in: httpx.AsyncClient, history: dict[str, str]
+) -> None:
+    body = (await signed_in.get("/api/requests?status=failed")).json()
+
+    assert body["total"] == 1
+    [item] = body["items"]
+    # Both jobs, not just the failed one that matched.
+    assert sorted(job["status"] for job in item["jobs"]) == ["completed", "failed"]
+    assert {job["site_key"] for job in item["jobs"]} == {"youtube", "bilibili"}
+    assert {"completed_path", "imported_path", "import_detail"} <= set(item["jobs"][0])
+
+
+async def test_list_q_searches(
+    signed_in: httpx.AsyncClient, add_history: Callable[..., Any]
+) -> None:
+    bunny = await add_history(
+        "other", "2026-09-01T00:00:00", {"source_title": "Big Buck Bunny 4K"}, title="BBB"
+    )
+    await add_history("other", "2026-09-02T00:00:00", {"source_title": "Sintel"}, title="Sintel")
+    episode = await add_history(
+        "tv",
+        "2026-09-03T00:00:00",
+        {"source_title": "upload 1", "episode_title": "Pilot"},
+        title="Some Show",
+    )
+
+    assert await _ids(signed_in, "q=bunn") == {bunny}
+    assert await _ids(signed_in, "q=pil") == {episode}
+    assert await _ids(signed_in, "q=pil&type=movie") == set()
+    assert await _ids(signed_in, "q=%22%29%2A") == await _ids(signed_in, "")
+
+
+async def test_list_pages_are_newest_first_and_stable(
+    signed_in: httpx.AsyncClient, add_history: Callable[..., Any]
+) -> None:
+    days = ["2026-09-01", "2026-09-03", "2026-09-03", "2026-09-03", "2026-09-02", "2026-09-05"]
+    created = [(f"{day}T10:00:00", await add_history("other", f"{day}T10:00:00")) for day in days]
+    newest_first = [rid for _, rid in sorted(created, reverse=True)]
+
+    pages = []
+    for page in (1, 2, 3):
+        response = await signed_in.get(f"/api/requests?page={page}&per_page=2")
+        body = response.json()
+        assert (body["total"], body["page"], body["per_page"]) == (6, page, 2)
+        pages.append([item["id"] for item in body["items"]])
+
+    assert [rid for page in pages for rid in page] == newest_first
+    # Asking again gives the same page, ties included.
+    again = (await signed_in.get("/api/requests?page=2&per_page=2")).json()
+    assert [item["id"] for item in again["items"]] == pages[1]
+    assert (await signed_in.get("/api/requests?page=4&per_page=2")).json()["items"] == []
+
+
+@pytest.mark.parametrize(
+    "query", ["per_page=101", "per_page=0", "page=0", "type=show", "status=done", "bogus=1"]
+)
+async def test_list_per_page_above_100_is_422(signed_in: httpx.AsyncClient, query: str) -> None:
+    assert (await signed_in.get(f"/api/requests?{query}")).status_code == 422
+
+
+async def test_list_per_page_of_100_is_allowed(signed_in: httpx.AsyncClient) -> None:
+    assert (await signed_in.get("/api/requests?per_page=100")).status_code == 200
+
+
+async def test_list_requires_session(client: httpx.AsyncClient) -> None:
+    assert (await client.get("/api/requests")).status_code == 401
+
+
+# ------------------------------------------------ M9 AC7: download again
+
+
+@pytest.mark.parametrize("media_type", ["movie", "tv", "other"])
+async def test_get_request_has_what_the_wizard_needs(
+    signed_in: httpx.AsyncClient, add_history: Callable[..., Any], media_type: str
+) -> None:
+    media: dict[str, Any] = {
+        "movie": {"title": "Big Buck Bunny", "year": 2008, "radarr_movie_id": 7},
+        "tv": {"title": "Some Show", "numbering": "daily", "sonarr_series_id": 3},
+        "other": {"title": "a clip"},
+    }[media_type]
+    episode = (
+        {"season": 1, "episode": 2, "sonarr_episode_id": 102, "episode_title": "Second"}
+        if media_type == "tv"
+        else {}
+    )
+    request_id = await add_history(
+        media_type,
+        "2026-09-01T10:00:00",
+        {"url": "https://example.com/watch?v=abc123", **episode},
+        options={**OPTIONS, "quality": "720p", "container": "mp4"},
+        **media,
+    )
+
+    body = (await signed_in.get(f"/api/requests/{request_id}")).json()
+
+    assert body["media_type"] == media_type
+    assert body["options"]["quality"] == "720p"
+    assert body["options"]["container"] == "mp4"
+    for key in ("title", "year", "numbering", "radarr_movie_id", "sonarr_series_id"):
+        assert body[key] == media.get(key)
+    [job] = body["jobs"]
+    assert job["url"] == "https://example.com/watch?v=abc123"
+    for key in ("season", "episode", "sonarr_episode_id", "episode_title"):
+        assert job[key] == episode.get(key)
+    assert "air_date" in job
+
+
+# ------------------------------------------------ M9 AC8: fast on 5,000 jobs
+
+
+def _seed_5000_jobs(db_path: str) -> None:
+    """2,500 requests × 2 jobs through plain sqlite3, so the triggers fill the index."""
+    types = ("movie", "tv", "other")
+    statuses = ("completed", "failed", "cancelled")
+    requests, jobs = [], []
+    for n in range(2500):
+        request_id = f"r{n:05d}"
+        media_type = types[n % 3]
+        created = f"2026-{1 + n % 9:02d}-{1 + n % 28:02d} {n % 24:02d}:00:00"
+        requests.append((request_id, media_type, f"Show {n}", "{}", created))
+        for part in (1, 2):
+            jobs.append(
+                (
+                    f"j{n:05d}{part}",
+                    request_id,
+                    "https://example.com/v",
+                    f"Show {n} part {part} upload",
+                    f"Episode {part}" if media_type == "tv" else None,
+                    statuses[(n + part) % 3],
+                    "n/a",
+                    "youtube",
+                    "{}",
+                    "[]",
+                    "/tmp/unused",
+                    created,
+                )
+            )
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO requests (id, media_type, title, options, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            requests,
+        )
+        conn.executemany(
+            "INSERT INTO jobs (id, request_id, url, source_title, episode_title, status, "
+            "import_status, site_key, step_timings, sidecar_paths, job_dir, created_at, "
+            "cancel_requested, attempt, max_attempts, collision_policy, use_cookies, "
+            "transcode_fallback_used, import_attempts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, 'keep_both', 1, 0, 0)",
+            jobs,
+        )
+
+
+async def test_list_is_fast_on_5000_jobs(
+    signed_in: httpx.AsyncClient, migrated_db_url: str
+) -> None:
+    await asyncio.to_thread(_seed_5000_jobs, migrated_db_url.split("///", 1)[1])
+    url = "/api/requests?q=show%2012&type=tv&per_page=25"
+
+    first = await signed_in.get(url)  # warm-up: connections, statement cache
+    timings = []
+    for _ in range(3):
+        started = time.perf_counter()
+        response = await signed_in.get(url)
+        timings.append(time.perf_counter() - started)
+        assert response.json() == first.json()
+
+    body = first.json()
+    # "Show 12", "Show 120"-"Show 129", "Show 1200"-"Show 1299": the tv ones among them.
+    assert body["total"] == len([n for n in range(2500) if str(n).startswith("12") and n % 3 == 1])
+    assert all(item["media_type"] == "tv" for item in body["items"])
+    assert min(timings) < 0.1, timings

@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { SonarrEpisode, SonarrSeries } from '@/features/arr'
 import type { InspectResult } from '@/features/inspections'
+import type { Job } from '@/features/jobs'
 import { json, mockApi, renderApp, sentBodies } from '@/test/mockApi'
+
+import type { RequestRead } from '../types'
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
@@ -414,5 +417,59 @@ describe('one link, its own inspect and its own options (AC20)', () => {
 
     // The shared InspectCard's cookies explanation, not a bare error (§8).
     expect(await row.findByText('This video needs cookies.')).toBeInTheDocument()
+  })
+})
+
+describe('a series page reached by "download again" (M9)', () => {
+  const earlier: RequestRead = {
+    id: 'req-1',
+    media_type: 'tv',
+    title: 'Some Show',
+    year: null,
+    numbering: 'standard',
+    radarr_movie_id: null,
+    sonarr_series_id: 3,
+    options: { ...OPTIONS, quality: '1080p' } as RequestRead['options'],
+    created_at: '2026-09-01T10:00:00',
+    jobs: [{ id: 'job-1', url: URL, season: 1, sonarr_episode_id: 102 } as Job],
+  }
+
+  it('opens the episode and prefills it from a previous request', async () => {
+    const fetchMock = mockSeries({ 'GET /api/requests/req-1': () => json(earlier) })
+    renderApp('/download/tv/3?again=req-1&job=job-1')
+
+    // The episode's season opens by itself; the others stay closed.
+    const field = await screen.findByLabelText('Video URL for S01E02 · Episode 2 · 2024-03-08')
+    await waitFor(() => expect(field).toHaveValue(URL))
+    expect(screen.getByRole('button', { name: /^Season 1/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: /^Season 2/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    // The episode may be in Sonarr by now, so everything is listed.
+    expect(
+      screen.getByRole('checkbox', { name: 'Show episodes Sonarr already has' }),
+    ).toBeChecked()
+    // Only that row was filled in and inspected.
+    expect(screen.getByLabelText('Video URL for S01E03 · Episode 3 · 2024-03-15')).toHaveValue('')
+    await waitFor(() => expect(sentBodies(fetchMock, 'POST /api/inspect')).toEqual([{ url: URL }]))
+
+    const row = within(field.closest('form')!.parentElement!)
+    expect(await row.findByText(PATH)).toBeInTheDocument()
+    fireEvent.click(row.getByRole('button', { name: 'Download' }))
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'POST /api/requests')).toMatchObject([
+        {
+          media_type: 'tv',
+          media: { sonarr_series_id: 3, title: 'Some Show' },
+          items: [{ inspection_id: 7, episode: { sonarr_episode_id: 102, number: 2 } }],
+          options: { ...OPTIONS, quality: '1080p' },
+        },
+      ]),
+    )
   })
 })
