@@ -19,6 +19,7 @@ from app.inspections import router as inspections_router
 from app.integrations.arr import RadarrClient, SonarrClient
 from app.jobs import router as jobs_router
 from app.jobs.manager import JobManager
+from app.presets import router as presets_router
 from app.requests import router as requests_router
 from app.settings import router as settings_router
 from app.settings.service import SettingsService
@@ -94,6 +95,7 @@ def create_app(settings: Settings | None = None, static_dir: Path = STATIC_DIR) 
     app.include_router(settings_router.router, dependencies=[Depends(require_auth)])
     app.include_router(arr_router.router, dependencies=[Depends(require_auth)])
     app.include_router(sites_router.router, dependencies=[Depends(require_auth)])
+    app.include_router(presets_router.router, dependencies=[Depends(require_auth)])
 
     @app.api_route(
         "/api/{path:path}",

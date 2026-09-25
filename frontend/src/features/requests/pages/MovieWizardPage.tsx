@@ -1,3 +1,4 @@
+import { PresetSelector, useDefaultPreset } from '@/features/presets'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
@@ -9,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
-import { usePrefill, useDownloadAgain } from '../again'
+import { usePrefill, useDownloadAgain, useIsDownloadAgain } from '../again'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import MissingMoviePicker from '../components/MissingMoviePicker'
@@ -51,6 +52,7 @@ export default function MovieWizardPage() {
   const inspectionId = inspection.data?.inspection_id
 
   // "Download again" from History: the same movie and URL, with the old options.
+  useDefaultPreset('movie', setOptions, !useIsDownloadAgain())
   usePrefill(useDownloadAgain(), ({ request, job, options }) => {
     setTab('url')
     setMedia(
@@ -192,11 +194,16 @@ export default function MovieWizardPage() {
               />
             )}
 
+            <PresetSelector mediaType="movie" options={options} onApply={setOptions} />
             <DownloadOptionsFields
               value={options}
               onChange={setOptions}
               heights={inspection.data.video_heights ?? []}
               estimatedSizes={inspection.data.estimated_sizes ?? {}}
+              subtitles={inspection.data.subtitles ?? {}}
+              automaticCaptions={inspection.data.automatic_captions ?? {}}
+              audioTracks={inspection.data.audio_tracks ?? []}
+              hasHdr={inspection.data.has_hdr ?? false}
             />
             <CookiesChip
               siteKey={inspection.data.site_key ?? null}

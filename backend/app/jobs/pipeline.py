@@ -37,7 +37,13 @@ from app.integrations.arr import (
 from app.jobs.constants import STEPS, ImportStatus, JobStatus, Step
 from app.jobs.utils import SAMPLE, explain_rejection
 from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
-from app.library.organizer import CollisionPolicy, is_organized, organize, prune_empty_dirs
+from app.library.organizer import (
+    CollisionPolicy,
+    find_sidecars,
+    is_organized,
+    organize,
+    prune_empty_dirs,
+)
 from app.library.probe import ProbeError, probe
 from app.transcode.profiles import TranscodeProfile, marker
 from app.transcode.runner import transcode
@@ -289,10 +295,16 @@ async def _duration(video_path: Path) -> float | None:
 async def _organize(ctx: PipelineContext, video_path: Path) -> None:
     started = perf_counter()
     await ctx.set_status(JobStatus.ORGANIZING, Step.ORGANIZE)
+    # Only `sidecar` writes subtitle files; scanning the job dir is I/O, so off the loop (§3.2).
+    sidecars = (
+        await asyncio.to_thread(find_sidecars, ctx.job_dir, video_path)
+        if ctx.options.subtitles.mode == "sidecar"
+        else []
+    )
     result = await organize(
         ctx.job_dir,
         video_path,
-        [],
+        sidecars,
         ctx.target,
         ctx.collision_policy,
         completed_dir=ctx.completed_dir,

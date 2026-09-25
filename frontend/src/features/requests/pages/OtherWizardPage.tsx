@@ -1,3 +1,4 @@
+import { PresetSelector, useDefaultPreset } from '@/features/presets'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
@@ -9,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
-import { usePrefill, useDownloadAgain } from '../again'
+import { usePrefill, useDownloadAgain, useIsDownloadAgain } from '../again'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import { DEFAULT_OPTIONS } from '../types'
@@ -25,6 +26,7 @@ export default function OtherWizardPage() {
   const inspectionId = inspection.data?.inspection_id
 
   // "Download again" from History: the same URL, inspected afresh, with the old options.
+  useDefaultPreset('other', setOptions, !useIsDownloadAgain())
   usePrefill(useDownloadAgain(), ({ job, options }) => {
     setUrl(job.url)
     setOptions(options)
@@ -91,11 +93,16 @@ export default function OtherWizardPage() {
       {inspection.isSuccess && (
         <Card>
           <CardContent className="flex flex-col gap-4">
+            <PresetSelector mediaType="other" options={options} onApply={setOptions} />
             <DownloadOptionsFields
               value={options}
               onChange={setOptions}
               heights={inspection.data.video_heights ?? []}
               estimatedSizes={inspection.data.estimated_sizes ?? {}}
+              subtitles={inspection.data.subtitles ?? {}}
+              automaticCaptions={inspection.data.automatic_captions ?? {}}
+              audioTracks={inspection.data.audio_tracks ?? []}
+              hasHdr={inspection.data.has_hdr ?? false}
             />
             <CookiesChip
               siteKey={inspection.data.site_key ?? null}

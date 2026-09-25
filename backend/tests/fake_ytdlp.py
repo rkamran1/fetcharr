@@ -96,6 +96,12 @@ if mode == "download":
     else:
         with open(output, "wb") as handle:
             handle.write(b"video" * 1000)
+    # What --convert-subs srt leaves beside the video: `<id>.<lang>.srt` (§5 step 2d).
+    if "--write-subs" in argv and "--convert-subs" in argv:
+        base = os.path.splitext(output)[0]
+        for lang in argv[argv.index("--sub-langs") + 1].split(","):
+            with open(base + "." + lang + ".srt", "w") as handle:
+                handle.write("1\\n00:00:00,000 --> 00:00:01,000\\n" + lang + "\\n")
     with open(final_path_file, "a") as handle:
         handle.write(output + "\\n")
     record("end")

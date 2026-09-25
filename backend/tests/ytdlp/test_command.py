@@ -147,3 +147,110 @@ def test_transcoding_still_remuxes_and_changes_nothing_else() -> None:
     assert "--recode-video" not in transcoded
     # The selector is the only difference: no transcode flag ever reaches yt-dlp.
     assert transcoded[:1] + transcoded[2:] == plain[:1] + plain[2:]
+
+
+# ------------------------------- AC1/AC2/AC4/AC6: the M10a flags, absent unless asked for
+
+NEW_FLAGS = [
+    "--write-subs",
+    "--write-auto-subs",
+    "--embed-subs",
+    "--convert-subs",
+    "--sub-langs",
+    "--sponsorblock-mark",
+    "--sponsorblock-remove",
+    "--limit-rate",
+]
+
+
+def _options_argv(**overrides: object) -> list[str]:
+    options = DownloadOptions.model_validate({"quality": "1080p", **overrides})
+    return build_argv(
+        "https://example.test/v",
+        options,
+        Resolved(stream_type="dash", fragments=4, use_aria2c=False),
+        job_dir=JOB_DIR,
+        js_runtime="deno",
+    )
+
+
+def _between(argv: list[str], start: str, end: str) -> list[str]:
+    return argv[argv.index(start) : argv.index(end)]
+
+
+def test_default_options_add_no_new_option_flags() -> None:
+    argv = _options_argv()
+
+    assert [flag for flag in NEW_FLAGS if flag in argv] == []
+
+
+@pytest.mark.parametrize(
+    ("subtitles", "expected"),
+    [
+        (
+            {"mode": "embed", "languages": ["en"]},
+            ["--write-subs", "--sub-langs", "en", "--embed-subs"],
+        ),
+        (
+            {"mode": "sidecar", "languages": ["en"]},
+            ["--write-subs", "--sub-langs", "en", "--convert-subs", "srt"],
+        ),
+        (
+            {"mode": "embed", "languages": ["en", "pt-BR"], "include_auto_captions": True},
+            ["--write-subs", "--sub-langs", "en,pt-BR", "--write-auto-subs", "--embed-subs"],
+        ),
+        (
+            {"mode": "sidecar", "languages": ["de"], "include_auto_captions": True},
+            ["--write-subs", "--sub-langs", "de", "--write-auto-subs", "--convert-subs", "srt"],
+        ),
+    ],
+    ids=["embed", "sidecar", "embed-auto-two-langs", "sidecar-auto"],
+)
+def test_subtitle_flags(subtitles: dict[str, object], expected: list[str]) -> None:
+    argv = _options_argv(subtitles=subtitles)
+
+    assert _between(argv, "--write-subs", "--remux-video") == expected
+
+
+@pytest.mark.parametrize(
+    ("sponsorblock", "expected"),
+    [
+        ({"mode": "mark"}, ["--sponsorblock-mark", "all"]),
+        ({"mode": "remove"}, ["--sponsorblock-remove", "sponsor,selfpromo,interaction"]),
+        (
+            {"mode": "mark", "categories": ["intro", "outro"]},
+            ["--sponsorblock-mark", "intro,outro"],
+        ),
+        ({"mode": "remove", "categories": ["filler"]}, ["--sponsorblock-remove", "filler"]),
+    ],
+    ids=["mark-default", "remove-default", "mark-picked", "remove-picked"],
+)
+def test_sponsorblock_flags(sponsorblock: dict[str, object], expected: list[str]) -> None:
+    argv = _options_argv(sponsorblock=sponsorblock)
+
+    assert _between(argv, expected[0], "--remux-video") == expected
+
+
+def test_rate_limit_flag() -> None:
+    argv = _options_argv(rate_limit="5M")
+
+    assert argv[argv.index("--limit-rate") : argv.index("--limit-rate") + 2] == [
+        "--limit-rate",
+        "5M",
+    ]
+    assert "--limit-rate" not in _options_argv()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "dropped"),
+    [
+        ({"embed_metadata": False}, "--embed-metadata"),
+        ({"embed_chapters": False}, "--embed-chapters"),
+    ],
+    ids=["metadata", "chapters"],
+)
+def test_embed_toggles_only_drop_their_own_flag(overrides: dict[str, object], dropped: str) -> None:
+    argv = _options_argv(**overrides)
+
+    assert dropped not in argv
+    assert len(argv) == len(_options_argv()) - 1

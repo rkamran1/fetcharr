@@ -21,6 +21,7 @@ import {
   SeriesPage,
 } from '@/features/requests'
 import { SettingsPage } from '@/features/settings'
+import { PresetsPage } from '@/features/presets'
 import { CookiesPage } from '@/features/sites'
 import HomePage from '@/pages/HomePage'
 
@@ -70,7 +71,8 @@ export default function App() {
         <Route path="download/other" element={<OtherWizardPage />} />
         <Route path="queue" element={<QueuePage />} />
         <Route path="history" element={<HistoryPage />} />
-        <Route path="cookies" element={<CookiesPage />} />
+        <Route path="presets" element={<PresetsPage />} />
+          <Route path="cookies" element={<CookiesPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

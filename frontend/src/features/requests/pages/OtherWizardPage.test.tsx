@@ -1,12 +1,14 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { InspectResult } from '@/features/inspections'
 import type { Job } from '@/features/jobs'
+import type { Preset } from '@/features/presets'
 import type { Site } from '@/features/sites'
 import { json, mockApi, mockEventSource, renderApp, sentBodies } from '@/test/mockApi'
 
-import type { RequestRead } from '../types'
+import { DEFAULT_OPTIONS } from '../types'
+import type { DownloadOptions, RequestRead } from '../types'
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
@@ -242,6 +244,14 @@ describe('Other wizard', () => {
           retries: 5,
           transcode: 'off',
           transcode_quality: null,
+          subtitles: { mode: 'off', languages: [], include_auto_captions: false },
+          sponsorblock: { mode: 'off', categories: [] },
+          audio_language: null,
+          video_codec: 'any',
+          allow_hdr: true,
+          rate_limit: null,
+          embed_metadata: true,
+          embed_chapters: true,
         },
         use_cookies: true,
       },
@@ -257,6 +267,14 @@ describe('Other wizard', () => {
         retries: 5,
         transcode: 'off',
         transcode_quality: null,
+        subtitles: { mode: 'off', languages: [], include_auto_captions: false },
+        sponsorblock: { mode: 'off', categories: [] },
+        audio_language: null,
+        video_codec: 'any',
+        allow_hdr: true,
+        rate_limit: null,
+        embed_metadata: true,
+        embed_chapters: true,
       },
     })
   })
@@ -538,5 +556,218 @@ describe('Other wizard: download again', () => {
         },
       },
     ])
+  })
+})
+
+// ------------------------------------------- AC8: the M10a option groups and presets
+
+const WITH_SUBS: InspectResult = {
+  ...result,
+  subtitles: { en: ['srt'], de: ['vtt'] },
+  automatic_captions: { en: ['vtt'] },
+  audio_tracks: [
+    { lang: 'en', codec: 'opus', abr: 129 },
+    { lang: 'ja', codec: 'opus', abr: 129 },
+  ],
+  has_hdr: true,
+}
+
+function preset(overrides: Partial<Preset> = {}): Preset {
+  return {
+    id: 1,
+    name: 'Phone-friendly mp4',
+    media_type: 'other',
+    options: { quality: '720p', container: 'mp4', rate_limit: '5M' },
+    is_default: true,
+    ...overrides,
+  }
+}
+
+describe('Other wizard: subtitles, extras and presets', () => {
+  function mockWizard(routes: Record<string, () => Response> = {}) {
+    const fetchMock = mockApi({
+      ...base,
+      'POST /api/inspect': () => json(WITH_SUBS),
+      'POST /api/preview': () => json(preview),
+      'POST /api/requests': () => json({ id: 'r1', jobs: ['j1'] }, 201),
+      'GET /api/jobs': () => json({ jobs: [] }),
+      'GET /api/presets': () => json([]),
+      ...routes,
+    })
+    mockEventSource()
+    return fetchMock
+  }
+
+  it('hides the subtitle, audio and HDR controls when inspect found none', async () => {
+    mockWizard({ 'POST /api/inspect': () => json(result) })
+    renderApp('/download/other')
+
+    await inspectUrl()
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Advanced'))
+
+    expect(screen.queryByLabelText('Subtitles')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Audio track')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Allow HDR')).not.toBeInTheDocument()
+    // The options that apply to any video are always there.
+    expect(screen.getByLabelText('SponsorBlock')).toBeInTheDocument()
+    expect(screen.getByLabelText('Video codec')).toBeInTheDocument()
+    expect(screen.getByLabelText('Rate limit')).toBeInTheDocument()
+  })
+
+  it('shows the subtitle, audio and HDR controls when inspect found them', async () => {
+    mockWizard()
+    renderApp('/download/other')
+
+    await inspectUrl()
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+
+    const mode = screen.getByLabelText('Subtitles')
+    expect([...(mode as HTMLSelectElement).options].map((o) => o.value)).toEqual([
+      'off',
+      'embed',
+      'sidecar',
+    ])
+    const audio = screen.getByLabelText('Audio track') as HTMLSelectElement
+    expect([...audio.options].map((o) => o.value)).toEqual(['', 'en', 'ja'])
+
+    // The languages and the auto-caption toggle only appear once a mode is picked.
+    expect(screen.queryByLabelText('de')).not.toBeInTheDocument()
+    fireEvent.change(mode, { target: { value: 'sidecar' } })
+    expect(screen.getByLabelText('de')).toBeInTheDocument()
+    expect(screen.getByLabelText('Include auto-captions')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Advanced'))
+    expect(screen.getByLabelText('Allow HDR')).toBeInTheDocument()
+  })
+
+  it('sends the new options in the request body', async () => {
+    const fetchMock = mockWizard()
+    renderApp('/download/other')
+
+    await inspectUrl()
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Subtitles'), { target: { value: 'sidecar' } })
+    fireEvent.click(screen.getByLabelText('en'))
+    fireEvent.click(screen.getByLabelText('Include auto-captions'))
+    fireEvent.change(screen.getByLabelText('Audio track'), { target: { value: 'ja' } })
+    fireEvent.click(screen.getByText('Advanced'))
+    fireEvent.change(screen.getByLabelText('SponsorBlock'), { target: { value: 'remove' } })
+    fireEvent.change(screen.getByLabelText('Video codec'), { target: { value: 'h264' } })
+    fireEvent.change(screen.getByLabelText('Rate limit'), { target: { value: '5M' } })
+    fireEvent.click(screen.getByLabelText('Allow HDR'))
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    expect(await screen.findByRole('heading', { name: 'Queue' })).toBeInTheDocument()
+    const [body] = sentBodies(fetchMock, 'POST /api/requests') as { options: DownloadOptions }[]
+    expect(body.options.subtitles).toEqual({
+      mode: 'sidecar',
+      languages: ['en'],
+      include_auto_captions: true,
+    })
+    expect(body.options.sponsorblock).toEqual({ mode: 'remove', categories: [] })
+    expect(body.options.audio_language).toBe('ja')
+    expect(body.options.video_codec).toBe('h264')
+    expect(body.options.rate_limit).toBe('5M')
+    expect(body.options.allow_hdr).toBe(false)
+  })
+
+  it('preselects the default preset and applies it', async () => {
+    const fetchMock = mockWizard({ 'GET /api/presets': () => json([preset()]) })
+    renderApp('/download/other')
+
+    await inspectUrl()
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+
+    expect(await screen.findByDisplayValue('mp4')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    expect(await screen.findByRole('heading', { name: 'Queue' })).toBeInTheDocument()
+    const [body] = sentBodies(fetchMock, 'POST /api/requests') as { options: DownloadOptions }[]
+    expect(body.options.container).toBe('mp4')
+    expect(body.options.quality).toBe('720p')
+    expect(body.options.rate_limit).toBe('5M')
+    // Everything the preset didn't name falls back to the defaults, never to undefined.
+    expect(body.options.subtitles).toEqual({
+      mode: 'off',
+      languages: [],
+      include_auto_captions: false,
+    })
+  })
+
+  it('offers an `any` preset here too, and leaves a non-default one unapplied', async () => {
+    mockWizard({
+      'GET /api/presets': () =>
+        json([
+          preset({ id: 2, name: 'Anywhere', media_type: 'any', is_default: false }),
+          preset({ id: 3, name: 'Movies only', media_type: 'movie', is_default: true }),
+        ]),
+    })
+    renderApp('/download/other')
+
+    await inspectUrl()
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+
+    const picker = (await screen.findByLabelText('Preset')) as HTMLSelectElement
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['No preset', 'Anywhere'])
+    // Nothing was the default for `other`, so the form is still on its own defaults.
+    expect(picker.value).toBe('')
+    expect(screen.getByLabelText('Container')).toHaveValue('mkv')
+
+    fireEvent.change(picker, { target: { value: '2' } })
+    expect(screen.getByLabelText('Container')).toHaveValue('mp4')
+  })
+
+  it('keeps download-again options over the default preset', async () => {
+    const earlier: RequestRead = {
+      id: 'req-1',
+      media_type: 'other',
+      title: 'Big Buck Bunny',
+      year: null,
+      numbering: null,
+      radarr_movie_id: null,
+      sonarr_series_id: null,
+      options: { quality: '480p', container: 'mkv' },
+      created_at: '2026-09-01T10:00:00',
+      jobs: [{ id: 'job-1', url: URL } as Job],
+    }
+    const fetchMock = mockWizard({
+      'GET /api/presets': () => json([preset()]),
+      'GET /api/requests/req-1': () => json(earlier),
+    })
+    renderApp('/download/other?again=req-1&job=job-1')
+
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    expect(await screen.findByRole('heading', { name: 'Queue' })).toBeInTheDocument()
+    const [body] = sentBodies(fetchMock, 'POST /api/requests') as { options: DownloadOptions }[]
+    expect(body.options.quality).toBe('480p')
+    expect(body.options.container).toBe('mkv')
+  })
+
+  it('saves the current options as a preset', async () => {
+    const fetchMock = mockWizard({
+      'POST /api/presets': () => json(preset({ id: 9, name: 'My preset' }), 201),
+    })
+    renderApp('/download/other')
+
+    await inspectUrl()
+    expect(await screen.findByText(preview.path)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Quality'), { target: { value: '1080p' } })
+    fireEvent.change(screen.getByLabelText('Save as preset'), { target: { value: 'My preset' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'POST /api/presets')).toEqual([
+        {
+          name: 'My preset',
+          media_type: 'other',
+          options: { ...DEFAULT_OPTIONS, quality: '1080p' },
+        },
+      ]),
+    )
   })
 })

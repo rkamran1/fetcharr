@@ -38,11 +38,18 @@ def build_argv(
             container,
             # Keep the decode on the GPU when the file is going to be re-encoded (§4.1).
             prefer_gpu_decode=options.transcode is not TranscodeProfile.OFF,
+            video_codec=options.video_codec,
+            audio_language=options.audio_language,
+            allow_hdr=options.allow_hdr,
         ),
         "--merge-output-format",
         container,
-        "--embed-chapters",
-        "--embed-metadata",
+    ]
+    if options.embed_chapters:
+        argv.append("--embed-chapters")
+    if options.embed_metadata:
+        argv.append("--embed-metadata")
+    argv += [
         "--no-playlist",
         "--concurrent-fragments",
         str(resolved.fragments),
@@ -69,6 +76,11 @@ def build_argv(
         if js_runtime == "node":
             argv += ["--js-runtimes", "node"]
 
+    argv += _subtitle_args(options)
+    argv += _sponsorblock_args(options)
+    if options.rate_limit is not None:
+        argv += ["--limit-rate", options.rate_limit]
+
     # Transcoding is a separate ffmpeg step (M7), so the download always remuxes.
     argv += ["--remux-video", container]
 
@@ -90,6 +102,30 @@ def build_argv(
 
     argv.append(url)
     return argv
+
+
+def _subtitle_args(options: DownloadOptions) -> list[str]:
+    """`embed` keeps them in the container, `sidecar` writes `<id>.<lang>.srt` (§5 step 2d)."""
+    subtitles = options.subtitles
+    if subtitles.mode == "off":
+        return []
+    argv = ["--write-subs", "--sub-langs", ",".join(subtitles.languages)]
+    if subtitles.include_auto_captions:
+        argv.append("--write-auto-subs")
+    if subtitles.mode == "embed":
+        argv.append("--embed-subs")
+    else:
+        # The Organizer renames the converted file to `<video base>.<lang>.srt` (§7.2).
+        argv += ["--convert-subs", "srt"]
+    return argv
+
+
+def _sponsorblock_args(options: DownloadOptions) -> list[str]:
+    sponsorblock = options.sponsorblock
+    if sponsorblock.mode == "off":
+        return []
+    flag = "--sponsorblock-mark" if sponsorblock.mode == "mark" else "--sponsorblock-remove"
+    return [flag, ",".join(sponsorblock.chosen())]
 
 
 def downgrade_fragments(argv: list[str]) -> list[str]:
