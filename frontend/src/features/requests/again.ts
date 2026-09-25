@@ -48,6 +48,16 @@ export function useDownloadAgain(): Prefill | null {
   }, [request.data, jobId])
 }
 
+/**
+ * Whether this wizard was opened by "download again". Unlike `useDownloadAgain`, it answers
+ * on the first render, before the request has loaded: a default preset must not overwrite
+ * options that are still on their way.
+ */
+export function useIsDownloadAgain(): boolean {
+  const [params] = useSearchParams()
+  return params.get('again') !== null
+}
+
 /** Apply a prefill once per job, however often the page renders afterwards. */
 export function usePrefill(prefill: Prefill | null, apply: (prefill: Prefill) => void): void {
   const applied = useRef<string | null>(null)

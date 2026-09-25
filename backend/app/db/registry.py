@@ -7,6 +7,7 @@ from app.auth import models as auth_models
 from app.db.base import Base
 from app.inspections import models as inspections_models
 from app.jobs import models as jobs_models
+from app.presets import models as presets_models
 from app.requests import models as requests_models
 from app.settings import models as settings_models
 from app.sites import models as sites_models
@@ -18,6 +19,7 @@ MODEL_MODULES = (
     jobs_models,
     settings_models,
     sites_models,
+    presets_models,
 )
 
 metadata = Base.metadata

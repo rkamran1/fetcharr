@@ -7,7 +7,7 @@ import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.library.naming import Other, Target, build_path, quality_label, sidecar_name
 from app.library.probe import ProbeError, probe
@@ -95,6 +95,22 @@ async def organize(
         completed_dir,
         incomplete_dir,
     )
+
+
+def find_sidecars(job_dir: Path, video_path: Path) -> list[Sidecar]:
+    """The `<id>.<lang>.srt` files `--convert-subs srt` left in the job dir (§5 step 2d).
+
+    Sync: the caller runs it off the event loop. A file without a `.<lang>` part has no
+    language to name it after, so it is left where it is rather than guessed at.
+    """
+    found = []
+    for path in sorted(job_dir.glob("*.srt")):
+        if path == video_path or not path.is_file():
+            continue
+        language = PurePosixPath(path.stem).suffix.lstrip(".")
+        if language:
+            found.append(Sidecar(path, language))
+    return sorted(found, key=lambda sidecar: sidecar.lang)
 
 
 def prune_empty_dirs(directory: Path, root: Path) -> None:

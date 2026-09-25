@@ -74,3 +74,95 @@ def test_a_picked_profile_is_kept(profile: str | TranscodeProfile) -> None:
 def test_rejects_invalid_transcode_values(overrides: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         DownloadOptions.model_validate({"quality": "720p", **overrides})
+
+
+# ------------------------------------- AC2/AC4/AC6: the M10a options and their allow-lists
+
+
+def test_new_options_default_to_the_script_behaviour() -> None:
+    options = DownloadOptions(quality="720p")
+
+    assert options.subtitles.mode == "off"
+    assert options.subtitles.languages == ()
+    assert options.subtitles.include_auto_captions is False
+    assert options.sponsorblock.mode == "off"
+    assert options.audio_language is None
+    assert options.video_codec == "any"
+    assert options.allow_hdr is True
+    assert options.rate_limit is None
+    assert options.embed_metadata is True
+    assert options.embed_chapters is True
+
+
+@pytest.mark.parametrize("language", ["en", "pt-BR", "zh-Hans", "fil"])
+def test_accepts_language_tags(language: str) -> None:
+    options = _with(subtitles={"mode": "sidecar", "languages": [language]})
+
+    assert options.subtitles.languages == (language,)
+
+
+@pytest.mark.parametrize("language", ["en_US", "EN", "e", "../x", "", "en;rm -rf", "english-x"])
+def test_rejects_a_malformed_subtitle_language(language: str) -> None:
+    with pytest.raises(ValidationError):
+        _with(subtitles={"mode": "sidecar", "languages": [language]})
+
+
+@pytest.mark.parametrize("language", ["en_US", "EN", "", "-en"])
+def test_rejects_a_malformed_audio_language(language: str) -> None:
+    with pytest.raises(ValidationError):
+        _with(audio_language=language)
+
+
+@pytest.mark.parametrize("mode", ["embed", "sidecar"])
+def test_a_subtitle_mode_needs_at_least_one_language(mode: str) -> None:
+    with pytest.raises(ValidationError):
+        _with(subtitles={"mode": mode, "languages": []})
+
+
+def test_subtitle_languages_are_deduplicated() -> None:
+    options = _with(subtitles={"mode": "embed", "languages": ["en", "de", "en"]})
+
+    assert options.subtitles.languages == ("en", "de")
+
+
+def test_rejects_a_sponsorblock_category_outside_the_allow_list() -> None:
+    with pytest.raises(ValidationError):
+        _with(sponsorblock={"mode": "mark", "categories": ["rm -rf"]})
+
+
+def test_poi_highlight_cannot_be_removed() -> None:
+    assert _with(sponsorblock={"mode": "mark", "categories": ["poi_highlight"]})
+
+    with pytest.raises(ValidationError):
+        _with(sponsorblock={"mode": "remove", "categories": ["poi_highlight"]})
+
+
+def test_sponsorblock_fills_in_the_mode_default() -> None:
+    assert _with(sponsorblock={"mode": "mark"}).sponsorblock.chosen() == ("all",)
+    assert _with(sponsorblock={"mode": "remove"}).sponsorblock.chosen() == (
+        "sponsor",
+        "selfpromo",
+        "interaction",
+    )
+    picked = _with(sponsorblock={"mode": "mark", "categories": ["intro", "outro"]})
+    assert picked.sponsorblock.chosen() == ("intro", "outro")
+
+
+@pytest.mark.parametrize("rate", ["500K", "5M", "1.5M", "800"])
+def test_rate_limit_accepts_valid_rates(rate: str) -> None:
+    assert _with(rate_limit=rate).rate_limit == rate
+
+
+@pytest.mark.parametrize("rate", ["abc", "-1", "5G/s", "5 M", "0", "", "5M ", "M5"])
+def test_rate_limit_rejects_invalid_rates(rate: str) -> None:
+    with pytest.raises(ValidationError):
+        _with(rate_limit=rate)
+
+
+def test_nested_options_reject_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        _with(subtitles={"mode": "off", "exec": "rm -rf /"})
+
+
+def _with(**overrides: Any) -> DownloadOptions:
+    return DownloadOptions.model_validate({"quality": "720p", **overrides})

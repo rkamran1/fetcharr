@@ -419,3 +419,54 @@ async def test_is_organized(run: Run, video: Path, content: bytes, job_dir: Path
     # Still in the job dir → not organised, whatever was recorded.
     put(video, content)
     assert not is_organized(job_dir, video, result.video)
+
+
+# ----------------------------------------- AC3: the sidecars yt-dlp left in the job dir
+
+
+def test_find_sidecars_reads_the_language_from_the_name(tmp_path: Path) -> None:
+    job_dir = tmp_path / "job"
+    video = put(job_dir / "dQw4w9WgXcQ.mkv", b"video")
+    english = put(job_dir / "dQw4w9WgXcQ.en.srt", SUB_TEXT)
+    portuguese = put(job_dir / "dQw4w9WgXcQ.pt-BR.srt", SUB_TEXT)
+
+    assert organizer.find_sidecars(job_dir, video) == [
+        Sidecar(english, "en"),
+        Sidecar(portuguese, "pt-BR"),
+    ]
+
+
+def test_find_sidecars_ignores_the_video_and_unlabelled_files(tmp_path: Path) -> None:
+    job_dir = tmp_path / "job"
+    video = put(job_dir / "clip.mkv", b"video")
+    put(job_dir / "clip.srt", SUB_TEXT)
+    put(job_dir / "clip.en.vtt", SUB_TEXT)
+    put(job_dir / "final_path", b"/somewhere")
+    (job_dir / "tmp").mkdir()
+
+    assert organizer.find_sidecars(job_dir, video) == []
+
+
+async def test_sidecars_found_in_the_job_dir_are_named_after_the_video(
+    job_dir: Path,
+    video: Path,
+    subtitle: Sidecar,
+    content: bytes,
+    completed: Path,
+    incomplete: Path,
+) -> None:
+    found = organizer.find_sidecars(job_dir, video)
+    assert found == [subtitle]
+
+    result = await organize(
+        job_dir,
+        video,
+        found,
+        BUNNY,
+        CollisionPolicy.ASK,
+        completed_dir=completed,
+        incomplete_dir=incomplete,
+    )
+
+    assert tree(completed) == {VIDEO: content, SUB: SUB_TEXT}
+    assert result.sidecars == (completed / SUB,)

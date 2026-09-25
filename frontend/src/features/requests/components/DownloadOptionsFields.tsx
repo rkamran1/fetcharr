@@ -5,7 +5,15 @@ import { Input } from '@/components/ui/input'
 import { formatBytes } from '@/lib/format'
 
 import NativeSelect from './NativeSelect'
-import type { Container, DownloadOptions, Quality, TranscodeProfile } from '../types'
+import type {
+  Container,
+  DownloadOptions,
+  Quality,
+  SponsorBlockMode,
+  SubtitleMode,
+  TranscodeProfile,
+  VideoCodec,
+} from '../types'
 
 const QUALITIES: Quality[] = ['144p', '240p', '360p', '480p', '720p', '1080p', '1440p', '2160p']
 const FRAGMENTS = ['auto', '1', '2', '4', '8'] as const
@@ -20,20 +28,48 @@ const TRANSCODES: { value: TranscodeProfile; label: string }[] = [
   { value: 'x265-software', label: 'x265 software' },
 ]
 
+const CODECS: { value: VideoCodec; label: string }[] = [
+  { value: 'any', label: 'Any' },
+  { value: 'h264', label: 'H.264' },
+  { value: 'vp9', label: 'VP9' },
+  { value: 'av1', label: 'AV1' },
+]
+
+const SUBTITLE_MODES: { value: SubtitleMode; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'embed', label: 'Embed in the video' },
+  { value: 'sidecar', label: 'Sidecar .srt' },
+]
+
+const SPONSORBLOCK_MODES: { value: SponsorBlockMode; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'mark', label: 'Mark as chapters' },
+  { value: 'remove', label: 'Remove the segments' },
+]
+
 type Props = {
   value: DownloadOptions
   onChange: (next: DownloadOptions) => void
   /** The heights this video really has (requirements §5 step 2d). */
-  heights: number[]
-  estimatedSizes: Record<string, number>
+  heights?: number[]
+  estimatedSizes?: Record<string, number>
+  /** From the inspection: a group is only shown when this video really has it (§5 step 1). */
+  subtitles?: Record<string, string[]>
+  automaticCaptions?: Record<string, string[]>
+  audioTracks?: { lang: string | null }[]
+  hasHdr?: boolean
 }
 
 /** The download options shared by every wizard (requirements §5 step 2d). */
 export default function DownloadOptionsFields({
   value,
   onChange,
-  heights,
-  estimatedSizes,
+  heights = [],
+  estimatedSizes = {},
+  subtitles = {},
+  automaticCaptions = {},
+  audioTracks = [],
+  hasHdr = false,
 }: Props) {
   // Unique per instance: a TV season shows one of these per episode, and duplicate ids
   // would point every label at the first row's control.
@@ -74,6 +110,23 @@ export default function DownloadOptionsFields({
   const bestLabel =
     tallest > 0 ? `Best available (${tallest}p${sizeOf(tallest)})` : 'Best available'
 
+  // The languages this video really offers, manual subtitles first (§5 step 1).
+  const subtitleLanguages = [
+    ...new Set([...Object.keys(subtitles), ...Object.keys(automaticCaptions)]),
+  ].sort()
+  const hasAutoCaptions = Object.keys(automaticCaptions).length > 0
+  // Only worth a control when there is something to choose between.
+  const audioLanguages = [
+    ...new Set(audioTracks.map((track) => track.lang).filter((lang) => lang !== null)),
+  ].sort()
+
+  const toggleLanguage = (language: string, on: boolean) => {
+    const next = on
+      ? [...value.subtitles.languages, language]
+      : value.subtitles.languages.filter((picked) => picked !== language)
+    set('subtitles', { ...value.subtitles, languages: next })
+  }
+
   const fragments = value.fragments === 'auto' ? 'auto' : String(value.fragments)
   const aria2c = value.use_aria2c === 'auto' ? 'auto' : value.use_aria2c ? 'on' : 'off'
 
@@ -108,8 +161,136 @@ export default function DownloadOptionsFields({
         </div>
       </div>
 
+      {subtitleLanguages.length > 0 && (
+        <fieldset className="flex flex-col gap-3">
+          <legend className="text-sm font-medium">Subtitles</legend>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${id}-subtitle-mode`}>Subtitles</Label>
+            <NativeSelect
+              id={`${id}-subtitle-mode`}
+              value={value.subtitles.mode}
+              onChange={(e) =>
+                set('subtitles', { ...value.subtitles, mode: e.target.value as SubtitleMode })
+              }
+            >
+              {SUBTITLE_MODES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          {value.subtitles.mode !== 'off' && (
+            <>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {subtitleLanguages.map((language) => (
+                  <label key={language} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={value.subtitles.languages.includes(language)}
+                      onChange={(e) => toggleLanguage(language, e.target.checked)}
+                    />
+                    {language}
+                  </label>
+                ))}
+              </div>
+              {hasAutoCaptions && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={value.subtitles.include_auto_captions}
+                    onChange={(e) =>
+                      set('subtitles', {
+                        ...value.subtitles,
+                        include_auto_captions: e.target.checked,
+                      })
+                    }
+                  />
+                  Include auto-captions
+                </label>
+              )}
+            </>
+          )}
+        </fieldset>
+      )}
+
+      {audioLanguages.length > 1 && (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`${id}-audio-language`}>Audio track</Label>
+          <NativeSelect
+            id={`${id}-audio-language`}
+            value={value.audio_language ?? ''}
+            onChange={(e) => set('audio_language', e.target.value === '' ? null : e.target.value)}
+          >
+            <option value="">Best available</option>
+            {audioLanguages.map((language) => (
+              <option key={language} value={language}>
+                {language}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+      )}
+
       <details className="text-sm">
         <summary className="cursor-pointer">Advanced</summary>
+        <div className="flex flex-col gap-4 pt-4 sm:flex-row">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${id}-video-codec`}>Video codec</Label>
+            <NativeSelect
+              id={`${id}-video-codec`}
+              value={value.video_codec}
+              onChange={(e) => set('video_codec', e.target.value as VideoCodec)}
+            >
+              {CODECS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${id}-sponsorblock`}>SponsorBlock</Label>
+            <NativeSelect
+              id={`${id}-sponsorblock`}
+              value={value.sponsorblock.mode}
+              onChange={(e) =>
+                set('sponsorblock', {
+                  ...value.sponsorblock,
+                  mode: e.target.value as SponsorBlockMode,
+                })
+              }
+            >
+              {SPONSORBLOCK_MODES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${id}-rate-limit`}>Rate limit</Label>
+            <Input
+              id={`${id}-rate-limit`}
+              className="w-32"
+              placeholder="e.g. 5M"
+              value={value.rate_limit ?? ''}
+              onChange={(e) => set('rate_limit', e.target.value === '' ? null : e.target.value)}
+            />
+          </div>
+        </div>
+        {hasHdr && (
+          <div className="pt-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={value.allow_hdr}
+                onChange={(e) => set('allow_hdr', e.target.checked)}
+              />
+              Allow HDR
+            </label>
+          </div>
+        )}
         <div className="flex flex-col gap-4 pt-4 sm:flex-row">
           <div className="flex flex-col gap-2">
             <Label htmlFor={`${id}-fragments`}>Fragments</Label>

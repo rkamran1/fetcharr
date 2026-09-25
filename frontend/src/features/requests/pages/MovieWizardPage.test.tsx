@@ -96,6 +96,14 @@ const OPTIONS = {
   // Transcoding is opt-in, so every wizard sends it off unless it was picked (AC15).
   transcode: 'off',
   transcode_quality: null,
+  subtitles: { mode: 'off', languages: [], include_auto_captions: false },
+  sponsorblock: { mode: 'off', categories: [] },
+  audio_language: null,
+  video_codec: 'any',
+  allow_hdr: true,
+  rate_limit: null,
+  embed_metadata: true,
+  embed_chapters: true,
 }
 
 function mockWizard(overrides: Record<string, () => Response> = {}) {

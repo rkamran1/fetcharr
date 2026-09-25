@@ -19,6 +19,7 @@ from app.jobs.constants import JobStatus, Step
 from app.jobs.manager import PROGRESS_DB_INTERVAL_S, JobManager
 from app.library.naming import DailyEpisode, Episode
 from app.library.organizer import MARKER
+from app.ytdlp.schemas import DownloadOptions, SubtitleOptions
 from tests.conftest import exists, is_file, names, setup_account, wait_until
 from tests.fake_ytdlp import FakeYtdlp
 from tests.jobs.conftest import TERMINAL, wait_for_status
@@ -511,3 +512,59 @@ async def _tv_job(new_job: Callable[..., Any], **fields: Any) -> str:
         episode_title=fields.pop("episode_title", None) or f"Episode {fields.get('episode')}",
         **fields,
     )
+
+
+# ------------------------------- AC3: sidecar subtitles are organised next to the video
+
+
+async def test_sidecar_subtitles_are_organised_next_to_the_video(
+    manager: JobManager,
+    settings: Settings,
+    new_job: Callable[..., Any],
+    read_job: Callable[[str], Any],
+    fake_ytdlp: FakeYtdlp,
+    media: dict[str, Path],
+) -> None:
+    fake_ytdlp.downloads(media["small"])
+    options = DownloadOptions(
+        quality="best",
+        retries=0,
+        subtitles=SubtitleOptions(mode="sidecar", languages=("en",)),
+    )
+    job_id = await new_job(options=options)
+    manager.wake()
+
+    job = await wait_for_status(read_job, job_id, *TERMINAL)
+
+    assert job.status == JobStatus.COMPLETED, job.error_message
+    video = settings.completed_dir / "other" / "Big Buck Bunny [abc123].mkv"
+    subtitle = video.with_name("Big Buck Bunny [abc123].en.srt")
+    assert Path(job.completed_path) == video
+    assert job.sidecar_paths == [str(subtitle)]
+    assert is_file(video)
+    assert is_file(subtitle)
+    assert not exists(settings.incomplete_dir / job_id)
+
+
+async def test_embedded_subtitles_leave_no_sidecar(
+    manager: JobManager,
+    settings: Settings,
+    new_job: Callable[..., Any],
+    read_job: Callable[[str], Any],
+    fake_ytdlp: FakeYtdlp,
+    media: dict[str, Path],
+) -> None:
+    fake_ytdlp.downloads(media["small"])
+    options = DownloadOptions(
+        quality="best",
+        retries=0,
+        subtitles=SubtitleOptions(mode="embed", languages=("en",)),
+    )
+    job_id = await new_job(options=options)
+    manager.wake()
+
+    job = await wait_for_status(read_job, job_id, *TERMINAL)
+
+    assert job.status == JobStatus.COMPLETED, job.error_message
+    assert job.sidecar_paths == []
+    assert names(settings.completed_dir / "other") == ["Big Buck Bunny [abc123].mkv"]

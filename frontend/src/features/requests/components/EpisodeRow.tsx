@@ -1,3 +1,4 @@
+import { PresetSelector, useDefaultPreset } from '@/features/presets'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 
@@ -50,6 +51,8 @@ export default function EpisodeRow({ episode, media, prefill = null }: Props) {
   const inspection = useMutation({ mutationFn: inspect })
   const inspectionId = inspection.data?.inspection_id
 
+  // A row opened from "download again" keeps that job's options over any preset.
+  useDefaultPreset('tv', setOptions, !prefill)
   usePrefill(prefill, ({ job, options }) => {
     setUrl(job.url)
     setOptions(options)
@@ -137,11 +140,16 @@ export default function EpisodeRow({ episode, media, prefill = null }: Props) {
       {!queued && inspection.isSuccess && (
         <div className="flex flex-col gap-3">
           {/* Seeded from this video's own formats, so the choices are real (§5 step 2d). */}
+          <PresetSelector mediaType="tv" options={options} onApply={setOptions} />
           <DownloadOptionsFields
             value={options}
             onChange={setOptions}
             heights={inspection.data.video_heights ?? []}
             estimatedSizes={inspection.data.estimated_sizes ?? {}}
+            subtitles={inspection.data.subtitles ?? {}}
+            automaticCaptions={inspection.data.automatic_captions ?? {}}
+            audioTracks={inspection.data.audio_tracks ?? []}
+            hasHdr={inspection.data.has_hdr ?? false}
           />
           <CookiesChip
             siteKey={inspection.data.site_key ?? null}

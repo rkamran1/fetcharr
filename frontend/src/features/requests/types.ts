@@ -16,6 +16,23 @@ export type Container = 'mkv' | 'mp4'
 /** What a download is re-encoded with; `off` (the default) only remuxes (§5 step 2d). */
 export type TranscodeProfile = 'off' | 'hevc-qsv' | 'hevc-vaapi' | 'x265-software'
 
+export type SubtitleMode = 'off' | 'embed' | 'sidecar'
+export type SponsorBlockMode = 'off' | 'mark' | 'remove'
+export type VideoCodec = 'any' | 'h264' | 'vp9' | 'av1'
+
+/** `sidecar` writes `<video base>.<lang>.srt` next to the file, which arr imports too. */
+export type SubtitleOptions = {
+  mode: SubtitleMode
+  languages: string[]
+  include_auto_captions: boolean
+}
+
+/** Empty `categories` means the mode's own default: `all` to mark, the ad types to remove. */
+export type SponsorBlockOptions = {
+  mode: SponsorBlockMode
+  categories: string[]
+}
+
 export type DownloadOptions = {
   quality: Quality
   container: Container
@@ -26,6 +43,16 @@ export type DownloadOptions = {
   transcode: TranscodeProfile
   /** `null` means "use the default stored in Settings for this profile" (§4.1). */
   transcode_quality: number | null
+  subtitles: SubtitleOptions
+  sponsorblock: SponsorBlockOptions
+  /** A language from the inspection's `audio_tracks`; `null` is yt-dlp's best track. */
+  audio_language: string | null
+  video_codec: VideoCodec
+  allow_hdr: boolean
+  /** yt-dlp's `--limit-rate`, e.g. `500K` or `1.5M`; `null` is unlimited. */
+  rate_limit: string | null
+  embed_metadata: boolean
+  embed_chapters: boolean
 }
 
 /** What every wizard starts from, so transcoding is off wherever a download begins. */
@@ -37,6 +64,14 @@ export const DEFAULT_OPTIONS: DownloadOptions = {
   retries: 5,
   transcode: 'off',
   transcode_quality: null,
+  subtitles: { mode: 'off', languages: [], include_auto_captions: false },
+  sponsorblock: { mode: 'off', categories: [] },
+  audio_language: null,
+  video_codec: 'any',
+  allow_hdr: true,
+  rate_limit: null,
+  embed_metadata: true,
+  embed_chapters: true,
 }
 
 /** Step 2a: what Radarr calls this movie, and which movie it is when one was picked. */
