@@ -9,7 +9,10 @@ import { Label } from '@/components/ui/label'
 import { MIN_PASSWORD_LENGTH, passwordProblem } from '@/lib/passwords'
 
 import ArrSettings from '../components/ArrSettings'
+import NamingSettings from '../components/NamingSettings'
+import PathsSettings from '../components/PathsSettings'
 import TranscodeSettings from '../components/TranscodeSettings'
+import YtdlpSettings from '../components/YtdlpSettings'
 
 function ChangePassword() {
   const [current, setCurrent] = useState('')
@@ -35,7 +38,7 @@ function ChangePassword() {
   const error = problem ?? (mutation.isError ? mutation.error.message : null)
 
   return (
-    <Card>
+    <Card role="region" aria-label="Change password">
       <CardHeader>
         <CardTitle>
           <h2>Change password</h2>
@@ -112,7 +115,7 @@ function ApiKeySection() {
   }
 
   return (
-    <Card>
+    <Card role="region" aria-label="API key">
       <CardHeader>
         <CardTitle>
           <h2>API key</h2>
@@ -155,9 +158,12 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">Settings</h1>
+      <PathsSettings />
+      <NamingSettings />
       <ArrSettings app="radarr" />
       <ArrSettings app="sonarr" />
       <TranscodeSettings />
+      <YtdlpSettings />
       <ChangePassword />
       <ApiKeySection />
     </div>

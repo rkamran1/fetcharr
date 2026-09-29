@@ -1,6 +1,7 @@
 """Env precedence and the connection the import step uses (requirements §7.5, AC1)."""
 
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 
 import pytest
 from cryptography.fernet import Fernet
@@ -8,7 +9,10 @@ from cryptography.fernet import Fernet
 from app.config import Settings
 from app.db.session import Database
 from app.integrations.arr import ArrConnection
-from app.settings.schemas import SettingsUpdate
+from app.library.naming import DEFAULT_TEMPLATES, ColonMode
+from app.settings.exceptions import InvalidSetting
+from app.settings.models import Setting
+from app.settings.schemas import NamingPreview, SettingsUpdate
 from app.settings.service import SettingsService
 from tests.conftest import RADARR_API_KEY, RADARR_URL, SONARR_API_KEY, SONARR_URL
 
@@ -112,3 +116,98 @@ async def test_a_half_configured_sonarr_has_no_connection(db: Database, settings
 
     assert await service.sonarr() is None
     assert (await service.read()).sonarr_api_key_set is False
+
+
+async def test_naming_defaults_to_the_documented_templates(
+    db: Database, settings: Settings
+) -> None:
+    assert await _service(db, settings).naming() == (DEFAULT_TEMPLATES, ColonMode.SMART)
+
+
+async def test_naming_round_trip(db: Database, settings: Settings) -> None:
+    service = _service(db, settings)
+
+    await service.update(
+        SettingsUpdate(naming_templates={"other": "{Title}"}, colon_mode=ColonMode.DASH)
+    )
+
+    templates, colon = await service.naming()
+    assert (templates.other, colon) == ("{Title}", ColonMode.DASH)
+    # The templates that weren't sent keep their default.
+    assert templates.movie_file == DEFAULT_TEMPLATES.movie_file
+
+
+async def test_unknown_token_raises_invalid_setting(db: Database, settings: Settings) -> None:
+    service = _service(db, settings)
+
+    with pytest.raises(InvalidSetting, match="{Episode}"):
+        await service.update(SettingsUpdate(naming_templates={"standard_episode": "{Episode}"}))
+
+    assert await service.naming() == (DEFAULT_TEMPLATES, ColonMode.SMART)
+
+
+async def test_unknown_template_key_raises_invalid_setting(
+    db: Database, settings: Settings
+) -> None:
+    with pytest.raises(InvalidSetting, match="nope"):
+        await _service(db, settings).update(SettingsUpdate(naming_templates={"nope": "{Title}"}))
+
+
+async def test_an_empty_template_is_refused(db: Database, settings: Settings) -> None:
+    with pytest.raises(InvalidSetting, match="must not be empty"):
+        await _service(db, settings).update(SettingsUpdate(naming_templates={"other": "  "}))
+
+
+async def test_a_stored_colon_mode_that_is_not_one_is_refused(
+    db: Database, settings: Settings
+) -> None:
+    """The schema refuses a bad mode at the API; this is the guard on what was stored."""
+    async with db.write_session() as session:
+        session.add(Setting(key="colon_mode", value="sideways", is_secret=False))
+
+    with pytest.raises(InvalidSetting, match="colon replacement mode"):
+        await _service(db, settings).naming()
+
+
+async def test_empty_templates_reset_to_the_defaults(db: Database, settings: Settings) -> None:
+    service = _service(db, settings)
+    await service.update(SettingsUpdate(naming_templates={"other": "{Title}"}))
+
+    read = await service.update(SettingsUpdate(naming_templates={}))
+
+    assert read.naming_templates == asdict(DEFAULT_TEMPLATES)
+    assert await service.naming() == (DEFAULT_TEMPLATES, ColonMode.SMART)
+
+
+async def test_preview_uses_the_form_over_the_stored_templates(
+    db: Database, settings: Settings
+) -> None:
+    service = _service(db, settings)
+    await service.update(SettingsUpdate(naming_templates={"other": "{Title}"}))
+
+    result = await service.preview_naming(NamingPreview(templates={"other": "{Id} {Title}"}))
+
+    assert result.examples["other"] == "other/dQw4w9WgXcQ A Talk - Part One.mkv"
+    assert result.errors == {}
+
+
+async def test_preview_reports_an_unknown_token_instead_of_failing(
+    db: Database, settings: Settings
+) -> None:
+    result = await _service(db, settings).preview_naming(
+        NamingPreview(templates={"other": "{Nope}"})
+    )
+
+    assert result.errors["other"].startswith("{Nope}")
+    # The other examples still render, from the stored templates.
+    assert result.examples["movie"].startswith("movies/")
+
+
+async def test_preview_follows_the_colon_mode(db: Database, settings: Settings) -> None:
+    service = _service(db, settings)
+
+    smart = await service.preview_naming(NamingPreview(colon_mode=ColonMode.SMART))
+    deleted = await service.preview_naming(NamingPreview(colon_mode=ColonMode.DELETE))
+
+    assert smart.examples["other"] != deleted.examples["other"]
+    assert deleted.examples["other"] == "other/A Talk Part One [dQw4w9WgXcQ].mkv"

@@ -36,7 +36,16 @@ from app.integrations.arr import (
 )
 from app.jobs.constants import STEPS, ImportStatus, JobStatus, Step
 from app.jobs.utils import SAMPLE, explain_rejection
-from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
+from app.library.naming import (
+    DEFAULT_TEMPLATES,
+    ColonMode,
+    DailyEpisode,
+    Episode,
+    Movie,
+    Other,
+    Target,
+    Templates,
+)
 from app.library.organizer import (
     CollisionPolicy,
     find_sidecars,
@@ -103,6 +112,9 @@ class PipelineContext:
     last_completed_step: Step | None = None
     completed_path: Path | None = None
     collision_policy: CollisionPolicy = CollisionPolicy.KEEP_BOTH
+    #: The naming the request was created with, so a Settings change spares running jobs.
+    templates: Templates = DEFAULT_TEMPLATES
+    colon: ColonMode = ColonMode.SMART
     #: The import half (§7.5); an `other` target never uses it.
     import_status: str = ImportStatus.NOT_APPLICABLE
     radarr_movie_id: int | None = None
@@ -309,6 +321,8 @@ async def _organize(ctx: PipelineContext, video_path: Path) -> None:
         ctx.collision_policy,
         completed_dir=ctx.completed_dir,
         incomplete_dir=ctx.incomplete_dir,
+        templates=ctx.templates,
+        colon=ctx.colon,
     )
     ctx.completed_path = result.video
     await ctx.checkpoint(

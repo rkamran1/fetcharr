@@ -5,18 +5,25 @@ from pathlib import PurePosixPath
 import pytest
 
 from app.library.naming import (
+    DEFAULT_TEMPLATES,
     MAX_NAME_BYTES,
     SUFFIX_RESERVE_BYTES,
+    TOKEN_NAMES,
     ColonMode,
     DailyEpisode,
     Episode,
     Movie,
     Other,
+    Templates,
     build_path,
+    from_snapshot,
+    preview,
     quality_label,
     replace_colons,
     sanitize,
     sidecar_name,
+    snapshot,
+    unknown_tokens,
 )
 
 HD = "WEBDL-1080p"
@@ -203,3 +210,56 @@ def test_hostile_titles_stay_single_components(
         assert part not in ("", ".", "..")
         assert "/" not in part and "\\" not in part
     assert len(path.parts) == {"movies": 3, "tv-shows": 4, "other": 2}[path.parts[0]]
+
+
+def test_unknown_tokens_are_listed() -> None:
+    assert unknown_tokens("{Movie Title} ({Release Year}) {Quality Full}") == []
+    assert unknown_tokens("{Series Title} - {Episode}") == ["{Episode}"]
+    assert unknown_tokens("{Nope} {Nope} {Also No}") == ["{Nope}", "{Also No}"]
+
+
+def test_every_documented_token_is_known() -> None:
+    assert unknown_tokens(" ".join(f"{{{token}}}" for token in TOKEN_NAMES)) == []
+
+
+def test_preview_renders_one_example_per_template() -> None:
+    examples = preview()
+
+    assert set(examples) == {"movie", "episode", "specials", "daily", "other"}
+    assert examples["movie"] == (
+        "movies/Blade Runner - The Final Cut (2007)/"
+        "Blade Runner - The Final Cut (2007) WEBDL-1080p.mkv"
+    )
+    assert examples["episode"] == (
+        "tv-shows/Star Trek - Discovery/Season 1/"
+        "Star Trek - Discovery - S01E05 - Choose Your Pain WEBDL-1080p.mkv"
+    )
+    assert examples["specials"].startswith("tv-shows/Star Trek - Discovery/Specials/")
+    assert examples["daily"].startswith("tv-shows/The Daily Show/Season 2026/")
+    assert examples["other"] == "other/A Talk - Part One [dQw4w9WgXcQ].mkv"
+
+
+def test_preview_follows_the_colon_mode() -> None:
+    assert preview(colon=ColonMode.DELETE)["other"] == "other/A Talk Part One [dQw4w9WgXcQ].mkv"
+    assert preview(colon=ColonMode.DASH)["other"] == "other/A Talk- Part One [dQw4w9WgXcQ].mkv"
+
+
+def test_preview_follows_the_templates() -> None:
+    templates = Templates(other="{Id} - {Title}")
+
+    assert preview(templates)["other"] == "other/dQw4w9WgXcQ - A Talk - Part One.mkv"
+
+
+def test_snapshot_round_trips() -> None:
+    templates = Templates(other="{Id}")
+
+    assert from_snapshot(snapshot(templates, ColonMode.DASH)) == (templates, ColonMode.DASH)
+
+
+def test_a_request_without_a_snapshot_gets_the_defaults() -> None:
+    assert from_snapshot(None) == (DEFAULT_TEMPLATES, ColonMode.SMART)
+    assert from_snapshot({}) == (DEFAULT_TEMPLATES, ColonMode.SMART)
+    assert from_snapshot({"templates": {"nope": "x"}, "colon": "?"}) == (
+        DEFAULT_TEMPLATES,
+        ColonMode.SMART,
+    )

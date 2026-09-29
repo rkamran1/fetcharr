@@ -23,7 +23,9 @@ import {
 import { SettingsPage } from '@/features/settings'
 import { PresetsPage } from '@/features/presets'
 import { CookiesPage } from '@/features/sites'
+import { StatusPage } from '@/features/system'
 import HomePage from '@/pages/HomePage'
+import SharePage from '@/pages/SharePage'
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -72,8 +74,10 @@ export default function App() {
         <Route path="queue" element={<QueuePage />} />
         <Route path="history" element={<HistoryPage />} />
         <Route path="presets" element={<PresetsPage />} />
-          <Route path="cookies" element={<CookiesPage />} />
+        <Route path="cookies" element={<CookiesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="status" element={<StatusPage />} />
+        <Route path="share" element={<SharePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

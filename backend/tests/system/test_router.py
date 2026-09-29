@@ -2,16 +2,26 @@
 
 import logging
 from collections.abc import AsyncIterator
+from datetime import date
 from pathlib import Path
 
 import httpx
 import pytest
+import respx
 from fastapi import FastAPI
 
 from app.config import Settings
+from app.db.backup import PREFIX, nightly_backup
 from app.main import create_app
 from app.system.utils import COMPLETED_SUBFOLDERS
-from tests.conftest import make_client, setup_account
+from tests.conftest import (
+    RADARR_URL,
+    SONARR_URL,
+    configure_radarr,
+    configure_sonarr,
+    make_client,
+    setup_account,
+)
 from tests.fake_ffmpeg import FakeFfmpeg
 
 
@@ -118,4 +128,110 @@ async def test_transcode_test_requires_a_session(app: FastAPI) -> None:
         client.cookies.clear()
 
         assert (await client.post("/api/system/transcode-test")).status_code == 401
+        assert (await client.get("/api/system/status")).status_code == 401
+
+
+# --------------------------------------- AC4: the full report (tools, database, arr)
+
+
+async def test_status_reports_every_field(
+    app: FastAPI, signed_in: httpx.AsyncClient, settings: Settings
+) -> None:
+    body = (await signed_in.get("/api/system/status")).json()
+
+    assert set(body) == {
+        "version",
+        "tools",
+        "paths",
+        "transcode",
+        "database",
+        "concurrency",
+        "radarr",
+        "sonarr",
+    }
+    assert set(body["tools"]) == {
+        "ytdlp",
+        "ffmpeg",
+        "deno",
+        "js_runtime",
+        "aria2c",
+        "update_on_start",
+    }
+    # The real ffmpeg is on PATH in CI and here, because the media fixtures need it.
+    assert body["tools"]["ffmpeg"]
+    assert body["tools"]["update_on_start"] is True
+    assert body["tools"]["js_runtime"] == app.state.manager.js_runtime
+    assert body["concurrency"] == {
+        "downloads": settings.max_concurrent_downloads,
+        "transcodes": settings.max_concurrent_transcodes,
+    }
+    assert body["database"]["path"].endswith(".db")
+    assert body["database"]["size_bytes"] > 0
+    assert body["database"]["last_backup"] is None
+    assert body["radarr"] == {
+        "configured": False,
+        "ok": False,
+        "version": None,
+        "error": "Radarr is not configured in Settings",
+    }
+
+
+async def test_status_reports_the_newest_nightly_backup(
+    app: FastAPI, signed_in: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    backups = tmp_path / "backups"
+    await nightly_backup(app.state.db, backups, date(2026, 5, 3))
+    await nightly_backup(app.state.db, backups, date(2026, 5, 4))
+    (backups / f"{PREFIX}20200101T000000000000Z.db").write_bytes(b"old")
+
+    body = (await signed_in.get("/api/system/status")).json()
+
+    assert body["database"]["last_backup"] == "fetcharr-2026-05-04.db"
+
+
+async def test_status_reports_a_reachable_radarr(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+    await configure_radarr(client)
+
+    async with respx.mock(base_url=RADARR_URL) as mock:
+        mock.get("/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "6.4.4"})
+        )
+
+        body = (await client.get("/api/system/status")).json()
+
+    assert body["radarr"] == {
+        "configured": True,
+        "ok": True,
+        "version": "6.4.4",
+        "error": None,
+    }
+
+
+async def test_status_reports_an_unreachable_radarr(client: httpx.AsyncClient) -> None:
+    """A down Radarr is one field of the report, not a failed report (AC4)."""
+    await setup_account(client)
+    await configure_radarr(client)
+    await configure_sonarr(client)
+
+    async with respx.mock(base_url=RADARR_URL) as radarr, respx.mock(base_url=SONARR_URL) as sonarr:
+        radarr.get("/api/v3/system/status").mock(side_effect=httpx.ConnectError("refused"))
+        sonarr.get("/api/v3/system/status").mock(
+            return_value=httpx.Response(200, json={"version": "4.0.20"})
+        )
+
+        response = await client.get("/api/system/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["radarr"]["ok"] is False
+    assert "unreachable" in body["radarr"]["error"]
+    assert body["radarr"]["configured"] is True
+    # The rest of the report is still there.
+    assert body["sonarr"] == {"configured": True, "ok": True, "version": "4.0.20", "error": None}
+    assert body["version"] == "1.2.3"
+
+
+async def test_status_requires_a_session(app: FastAPI) -> None:
+    async with make_client(app) as client:
         assert (await client.get("/api/system/status")).status_code == 401

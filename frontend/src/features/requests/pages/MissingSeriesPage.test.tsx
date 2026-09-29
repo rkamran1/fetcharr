@@ -193,3 +193,16 @@ describe('a series Sonarr is not monitoring (M6 review)', () => {
     expect(within(shows()[0]).queryByText(/Not monitored/)).not.toBeInTheDocument()
   })
 })
+
+describe('a shared link (M10b, AC7)', () => {
+  it('travels with the series choice, so the episode row can be filled', async () => {
+    const url = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
+    mockSeries()
+    renderApp(`/download/tv?url=${encodeURIComponent(url)}`)
+
+    await screen.findByRole('list', { name: 'Series missing episodes' })
+    const link = within(shows()[0]).getByRole('link')
+
+    expect(link).toHaveAttribute('href', `/download/tv/3?url=${encodeURIComponent(url)}`)
+  })
+})

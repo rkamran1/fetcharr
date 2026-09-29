@@ -11,12 +11,67 @@ const settings = {
   sonarr_api_key_set: false,
   sonarr_from_env: false,
   transcode_quality: { 'hevc-qsv': 24, 'hevc-vaapi': 24, 'x265-software': 23 },
+  naming_templates: {
+    movie_folder: '{Movie Title} ({Release Year})',
+    movie_file: '{Movie Title} ({Release Year}) {Quality Full}',
+    series_folder: '{Series Title}',
+    season_folder: 'Season {season}',
+    specials_folder: 'Specials',
+    standard_episode: '{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}',
+    daily_episode: '{Series Title} - {Air-Date} - {Episode Title} {Quality Full}',
+    other: '{Title} [{Id}]',
+  },
+  colon_mode: 'smart',
+}
+
+/** What the read-only Paths and yt-dlp sections read (§11). */
+const status = {
+  version: '1.2.3',
+  tools: {
+    ytdlp: '2026.09.01',
+    ffmpeg: '7.1.1',
+    deno: '2.1.4',
+    js_runtime: 'deno',
+    aria2c: true,
+    update_on_start: true,
+  },
+  paths: {
+    ok: true,
+    same_filesystem: true,
+    checks: [{ path: '/web-downloads/incomplete', ok: true, error: null }],
+  },
+  transcode: {
+    device: false,
+    device_path: '/dev/dri/renderD128',
+    tested: false,
+    hevc_encode: false,
+    ok: false,
+    message: 'no /dev/dri',
+    profiles: [],
+  },
+  database: { path: '/config/fetcharr.db', size_bytes: 2_000_000, last_backup: null },
+  concurrency: { downloads: 2, transcodes: 1 },
+  radarr: { configured: false, ok: false, version: null, error: 'not configured' },
+  sonarr: { configured: false, ok: false, version: null, error: 'not configured' },
+}
+
+const preview = {
+  examples: {
+    movie: 'movies/Blade Runner - The Final Cut (2007)/…',
+    episode: 'tv-shows/Star Trek - Discovery/Season 1/…',
+    specials: 'tv-shows/Star Trek - Discovery/Specials/…',
+    daily: 'tv-shows/The Daily Show/Season 2026/…',
+    other: 'other/A Talk - Part One [dQw4w9WgXcQ].mkv',
+  },
+  errors: {},
 }
 
 const base = {
   'GET /api/auth/me': () => json({ username: 'owner' }),
   'GET /healthz': () => json({ status: 'ok', version: '1.2.3' }),
   'GET /api/settings': () => json(settings),
+  'GET /api/system/status': () => json(status),
+  'POST /api/settings/naming/preview': () => json(preview),
 }
 
 function type(label: string, value: string) {
@@ -24,7 +79,14 @@ function type(label: string, value: string) {
 }
 
 /** The page holds one card per arr app and one for transcoding, so queries are scoped. */
-type Region = 'Radarr' | 'Sonarr' | 'Transcoding'
+type Region =
+  | 'Radarr'
+  | 'Sonarr'
+  | 'Transcoding'
+  | 'Naming'
+  | 'Paths and concurrency'
+  | 'yt-dlp'
+  | 'Change password'
 
 function card(name: Region) {
   return within(screen.getByRole('region', { name }))
@@ -49,7 +111,9 @@ describe('SettingsPage', () => {
 
     await fillPasswordForm('old password')
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Password changed.')
+    expect(await (await findCard('Change password')).findByRole('status')).toHaveTextContent(
+      'Password changed.',
+    )
     expect(sentBodies(fetchMock, 'POST /api/auth/password')).toEqual([
       { current_password: 'old password', new_password: 'a new password' },
     ])
@@ -66,7 +130,7 @@ describe('SettingsPage', () => {
     await fillPasswordForm('wrong password')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Current password is incorrect')
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(card('Change password').queryByRole('status')).not.toBeInTheDocument()
   })
 
   it('regenerates the API key and shows it once with copy', async () => {
@@ -140,7 +204,7 @@ describe('Radarr settings', () => {
 
     fireEvent.click((await findCard('Radarr')).getByRole('button', { name: 'Test' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await (await findCard('Radarr')).findByRole('status')).toHaveTextContent(
       "Radarr didn't answer: Radarr rejected the API key; check it in Settings",
     )
   })
@@ -217,7 +281,7 @@ describe('Sonarr settings (AC1)', () => {
 
     fireEvent.click((await findCard('Sonarr')).getByRole('button', { name: 'Test' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await (await findCard('Sonarr')).findByRole('status')).toHaveTextContent(
       "Sonarr didn't answer: Sonarr rejected the API key",
     )
   })
@@ -303,9 +367,8 @@ describe('Transcoding settings', () => {
     fireEvent.click(transcoding.getByRole('button', { name: 'Test hardware encode' }))
 
     expect(await transcoding.findByRole('status')).toHaveTextContent(report.message)
-    expect(
-      fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
-    ).toHaveLength(1)
+    // The encode runs once per click; it is a real one-second encode per profile.
+    expect(sentBodies(fetchMock, 'POST /api/system/transcode-test')).toHaveLength(1)
   })
 
   it('names each profile the hardware test tried', async () => {
@@ -330,5 +393,153 @@ describe('Transcoding settings', () => {
 
     expect(await transcoding.findByText('hevc-qsv: works')).toBeInTheDocument()
     expect(transcoding.getByText('hevc-vaapi: no VAAPI device')).toBeInTheDocument()
+  })
+})
+
+describe('Naming settings (AC3, AC9)', () => {
+  it('renders a live example and updates it as the template changes', async () => {
+    const fetchMock = mockApi(base)
+    renderApp('/settings')
+    const naming = await findCard('Naming')
+
+    expect(await naming.findByText(preview.examples.other)).toBeInTheDocument()
+
+    fireEvent.change(naming.getByLabelText('Other file'), { target: { value: '{Id}' } })
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'POST /api/settings/naming/preview').at(-1)).toMatchObject({
+        templates: { other: '{Id}' },
+      }),
+    )
+  })
+
+  it('previews the colon mode as well', async () => {
+    const fetchMock = mockApi(base)
+    renderApp('/settings')
+    const naming = await findCard('Naming')
+
+    fireEvent.change(await naming.findByLabelText('Colon replacement'), {
+      target: { value: 'delete' },
+    })
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'POST /api/settings/naming/preview').at(-1)).toMatchObject({
+        colon_mode: 'delete',
+      }),
+    )
+  })
+
+  it("shows the server's reason for a template it cannot use", async () => {
+    mockApi({
+      ...base,
+      'POST /api/settings/naming/preview': () =>
+        json({ examples: preview.examples, errors: { other: '{Nope} is not a token' } }),
+    })
+    renderApp('/settings')
+    const naming = await findCard('Naming')
+
+    expect(await naming.findByRole('alert')).toHaveTextContent('{Nope} is not a token')
+  })
+
+  it('saves only the templates that were edited', async () => {
+    const fetchMock = mockApi(base)
+    renderApp('/settings')
+    const naming = await findCard('Naming')
+
+    fireEvent.change(naming.getByLabelText('Other file'), { target: { value: '{Id}' } })
+    fireEvent.click(naming.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'PATCH /api/settings')).toEqual([
+        { naming_templates: { other: '{Id}' } },
+      ]),
+    )
+  })
+
+  it('resets the templates to the defaults', async () => {
+    const fetchMock = mockApi(base)
+    renderApp('/settings')
+    const naming = await findCard('Naming')
+
+    fireEvent.click(
+      await naming.findByRole('button', { name: 'Reset to Radarr/Sonarr defaults' }),
+    )
+
+    await waitFor(() =>
+      expect(sentBodies(fetchMock, 'PATCH /api/settings')).toEqual([
+        { naming_templates: {}, colon_mode: 'smart' },
+      ]),
+    )
+  })
+})
+
+describe('yt-dlp settings (AC1, AC9)', () => {
+  it('shows the version and updates it', async () => {
+    mockApi({
+      ...base,
+      'POST /api/settings/yt-dlp/update': () =>
+        json({ old: '2026.09.01', new: '2026.09.20', output: 'Successfully installed' }),
+    })
+    renderApp('/settings')
+    const ytdlp = await findCard('yt-dlp')
+
+    expect(await ytdlp.findByText('2026.09.01')).toBeInTheDocument()
+    fireEvent.click(ytdlp.getByRole('button', { name: 'Update yt-dlp' }))
+
+    expect(await ytdlp.findByRole('status')).toHaveTextContent(
+      'Updated from 2026.09.01 to 2026.09.20',
+    )
+  })
+
+  it('says so when yt-dlp was already current', async () => {
+    mockApi({
+      ...base,
+      'POST /api/settings/yt-dlp/update': () =>
+        json({ old: '2026.09.20', new: '2026.09.20', output: 'Requirement already satisfied' }),
+    })
+    renderApp('/settings')
+    const ytdlp = await findCard('yt-dlp')
+
+    fireEvent.click(await ytdlp.findByRole('button', { name: 'Update yt-dlp' }))
+
+    expect(await ytdlp.findByRole('status')).toHaveTextContent('Already up to date (2026.09.20)')
+  })
+
+  it('reports a failed update', async () => {
+    mockApi({
+      ...base,
+      'POST /api/settings/yt-dlp/update': () => json({ detail: 'could not reach the index' }, 502),
+    })
+    renderApp('/settings')
+    const ytdlp = await findCard('yt-dlp')
+
+    fireEvent.click(await ytdlp.findByRole('button', { name: 'Update yt-dlp' }))
+
+    expect(await ytdlp.findByRole('alert')).toHaveTextContent('could not reach the index')
+  })
+})
+
+describe('Paths and concurrency (AC4, AC9)', () => {
+  it('shows the self-test and the concurrency read-only', async () => {
+    mockApi(base)
+    renderApp('/settings')
+    const paths = await findCard('Paths and concurrency')
+
+    expect(await paths.findByRole('status')).toHaveTextContent('Every download folder is writable')
+    expect(paths.getByText('/web-downloads/incomplete', { exact: false })).toBeInTheDocument()
+    expect(paths.getByText('Concurrent downloads').nextSibling).toHaveTextContent('2')
+    expect(paths.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('warns when the folders are on two volumes', async () => {
+    mockApi({
+      ...base,
+      'GET /api/system/status': () =>
+        json({ ...status, paths: { ...status.paths, ok: false, same_filesystem: false } }),
+    })
+    renderApp('/settings')
+    const paths = await findCard('Paths and concurrency')
+
+    expect(await paths.findByRole('alert')).toHaveTextContent('different volumes')
   })
 })

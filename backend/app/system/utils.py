@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy.engine import make_url
+
+from app.db.backup import NIGHTLY_GLOB, PREFIX
+
 PROBE_NAME = ".fetcharr-probe"
 #: The folders every download passes through; they must all be writable and on one volume.
 COMPLETED_SUBFOLDERS = ("movies", "tv-shows", "other")
@@ -52,3 +56,26 @@ def _probe(folder: Path) -> None:
     probe.write_bytes(b"fetcharr")
     os.replace(probe, renamed)
     renamed.unlink()
+
+
+@dataclass(frozen=True)
+class DatabaseInfo:
+    path: str
+    size_bytes: int | None
+    last_backup: str | None
+
+
+def database_report(database_url: str, backups: Path | None) -> DatabaseInfo:
+    """The database file's size and the newest nightly backup; blocking, so off the loop."""
+    database = make_url(database_url).database
+    path = Path(database) if database else None
+    size = path.stat().st_size if path is not None and path.is_file() else None
+    newest = None
+    if backups is not None and backups.is_dir():
+        dated = sorted(
+            entry.name
+            for entry in backups.glob(NIGHTLY_GLOB)
+            if entry.is_file() and not entry.name.startswith(PREFIX)
+        )
+        newest = dated[-1] if dated else None
+    return DatabaseInfo(path=str(path or database_url), size_bytes=size, last_backup=newest)

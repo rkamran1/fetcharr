@@ -35,6 +35,7 @@ COPY --from=deno /deno /usr/local/bin/deno
 COPY --from=uv /uv /usr/local/bin/uv
 
 # yt-dlp in its own venv, so it can be upgraded without touching the app's dependencies.
+# The app user owns it below, so both the entrypoint and the in-app update can write to it.
 RUN python -m venv /opt/yt-dlp \
  && /opt/yt-dlp/bin/pip install --no-cache-dir --upgrade pip yt-dlp
 
@@ -51,7 +52,8 @@ COPY --from=web /web/dist /app/static
 
 RUN groupadd --gid 1000 app \
  && useradd --uid 1000 --gid app --no-create-home --home-dir /config --shell /usr/sbin/nologin app \
- && mkdir -p /config
+ && mkdir -p /config \
+ && chown -R app:app /opt/yt-dlp
 
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/fetcharr /usr/local/bin/fetcharr

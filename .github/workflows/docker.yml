@@ -8,6 +8,11 @@ on:
     branches: [main]
   push:
     branches: [main]
+    tags: ['v*.*.*']
+  # The weekly rebuild (§13.3), so fresh yt-dlp and base-image fixes reach :latest on their own.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -103,5 +108,57 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+
+  weekly:
+    # §13.3: rebuild the latest release tag as :latest, so a running server picks up a newer
+    # yt-dlp and base-image security fixes without a new release. Same gate as the image job.
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Resolve the latest release tag
+        id: release
+        run: |
+          tag="$(git tag --list 'v*.*.*' --sort=-v:refname | head -n 1)"
+          if [ -z "$tag" ]; then
+            echo "::notice::no v*.*.* tag yet, nothing to rebuild"
+          else
+            git checkout --detach "$tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+        if: steps.release.outputs.tag != ''
+      - name: Docker Hub login
+        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && steps.release.outputs.tag != ''
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && steps.release.outputs.tag != ''
+        uses: docker/metadata-action@v6
+        with:
+          images: docker.io/${{ vars.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.release.outputs.version }}
+      - name: Rebuild and push the latest release
+        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && steps.release.outputs.tag != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.release.outputs.version }}
             VCS_REF=${{ github.sha }}
           cache-from: type=gha

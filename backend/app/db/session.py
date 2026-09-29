@@ -67,6 +67,17 @@ class Database:
         async with self._write_lock, self._write_sessions() as session, session.begin():
             yield session
 
+    @asynccontextmanager
+    async def writer_lock(self) -> AsyncIterator[None]:
+        """Hold the single writer path without opening a transaction.
+
+        `VACUUM INTO` (the nightly backup, §3.1 rule 7) is refused inside one, and every
+        session here opens `BEGIN IMMEDIATE`. Holding the lock keeps it serialised with the
+        other writers all the same (§3.1 rule 4).
+        """
+        async with self._write_lock:
+            yield
+
     async def dispose(self) -> None:
         await self.reader.dispose()
         await self.writer.dispose()

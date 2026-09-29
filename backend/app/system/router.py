@@ -15,7 +15,7 @@ Service = Annotated[SystemService, Depends(get_system_service)]
 
 @router.get("/status", response_model=SystemStatus)
 async def status(service: Service) -> SystemStatus:
-    return service.status()
+    return await service.status()
 
 
 @router.post("/transcode-test", response_model=TranscodeReportRead)
