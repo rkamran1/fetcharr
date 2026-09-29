@@ -16,13 +16,21 @@ type Props = {
   showAll: boolean
   /** "Download again" for an episode of this season: opens it on that episode. */
   prefill: Prefill | null
+  /** Hands the URL shared into fetcharr to the first episode row that opens (§12). */
+  takeSharedUrl?: () => string | null
 }
 
 /**
  * One season of a series, collapsed until it is opened (§12). Its episodes are fetched on
  * the first open, so a series with ten seasons costs one request, not ten.
  */
-export default function SeasonSection({ season, media, showAll, prefill }: Props) {
+export default function SeasonSection({
+  season,
+  media,
+  showAll,
+  prefill,
+  takeSharedUrl,
+}: Props) {
   const [open, setOpen] = useState(false)
   usePrefill(prefill, () => setOpen(true))
   const seriesId = media.sonarr_series_id!
@@ -79,6 +87,7 @@ export default function SeasonSection({ season, media, showAll, prefill }: Props
                 episode={episode}
                 media={media}
                 prefill={prefill?.job.sonarr_episode_id === episode.id ? prefill : null}
+                takeSharedUrl={takeSharedUrl}
               />
             ))}
           </>

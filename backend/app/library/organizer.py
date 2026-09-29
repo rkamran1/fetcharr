@@ -9,7 +9,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
-from app.library.naming import Other, Target, build_path, quality_label, sidecar_name
+from app.library.naming import (
+    DEFAULT_TEMPLATES,
+    ColonMode,
+    Other,
+    Target,
+    Templates,
+    build_path,
+    quality_label,
+    sidecar_name,
+)
 from app.library.probe import ProbeError, probe
 
 # Written into the job dir before the first move; pins the destination for re-runs (§6.1).
@@ -66,6 +75,8 @@ async def organize(
     *,
     completed_dir: Path,
     incomplete_dir: Path,
+    templates: Templates = DEFAULT_TEMPLATES,
+    colon: ColonMode = ColonMode.SMART,
 ) -> Organized:
     """Probe, name and move the job's files. Safe to run again after any crash."""
     destination = await asyncio.to_thread(_read_marker, job_dir)
@@ -79,7 +90,9 @@ async def organize(
             raise InvalidMediaError(f"{video_path.name} has no video stream or no duration")
         quality = quality_label(media.width, media.height)
         try:
-            destination = completed_dir / build_path(target, quality, video_path.suffix)
+            destination = completed_dir / build_path(
+                target, quality, video_path.suffix, templates, colon
+            )
         except ValueError as error:
             raise OrganizeError(str(error)) from error
     policy = CollisionPolicy.KEEP_BOTH if isinstance(target, Other) else collision_policy

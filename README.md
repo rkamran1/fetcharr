@@ -12,7 +12,7 @@ Add the service from [`docker-compose.example.yml`](docker-compose.example.yml) 
 docker compose pull fetcharr && docker compose up -d fetcharr
 ```
 
-On start the container backs up an existing database to `/config/backups/` (keeping the newest 5), applies migrations, and serves the UI on port 8000 inside the container.
+On start the container upgrades yt-dlp (unless `YTDLP_UPDATE_ON_START=false`), backs up an existing database to `/config/backups/` (keeping the newest 5), applies migrations, and serves the UI on port 8000 inside the container. Every night at 03:00 it cleans stale folders out of `incomplete/` and writes a dated backup to `/config/backups/`, keeping the newest 7.
 
 On the first visit, fetcharr asks you to create its one account. Settings has "Change password" and an API key (sent as the `X-Api-Key` header).
 
@@ -33,7 +33,7 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `PUID` | `1000` | entrypoint | uid the app runs as. Use the same as your Sonarr/Radarr. |
 | `PGID` | `1000` | entrypoint | gid the app runs as. |
 | `UMASK` | `022` | entrypoint | umask for files the app creates (`002` to match a shared arr group). |
-| `TZ` | unset | container | time zone, e.g. `Asia/Karachi`. |
+| `TZ` | unset | container | time zone, e.g. `Asia/Karachi`. The nightly cleanup and database backup run at 03:00 in it. |
 | `DATABASE_URL` | `sqlite+aiosqlite:////config/fetcharr.db` | app | database location. Keep `/config` on a local disk. |
 | `COOKIE_SECURE` | `false` | app | add `Secure` to the session cookie. Keep `false` for plain HTTP on the LAN, set `true` behind HTTPS. |
 | `COMPLETED_DIR` | `/web-downloads/completed` | app | finished downloads, in `movies/`, `tv-shows/` and `other/`, waiting for Radarr/Sonarr to import them. |
@@ -41,6 +41,8 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `MAX_CONCURRENT_DOWNLOADS` | `2` | app | how many downloads run at once. The slot is held only while yt-dlp runs. |
 | `MAX_CONCURRENT_TRANSCODES` | `1` | app | how many transcodes run at once. The slot is held only while ffmpeg runs, so downloads keep flowing behind it. |
 | `LIBVA_DRIVER_NAME` | `iHD` | app | which libva driver ffmpeg loads for QSV/VAAPI. `iHD` is the Intel one; it only matters when `/dev/dri` is passed through. |
+| `INCOMPLETE_RETENTION_DAYS` | `7` | app | how long a failed, cancelled or orphaned job folder stays in `INCOMPLETE_DIR`, and how long replaced files stay in `_replaced/`. The nightly sweep deletes what is older. |
+| `YTDLP_UPDATE_ON_START` | `true` | entrypoint, app | upgrade yt-dlp inside its own venv before the app starts. A failed or offline update never stops the container; `false` keeps the version baked into the image. |
 | `AUTO_RESUME` | `true` | app | after a restart, resume jobs from their last completed step. `false` marks them failed instead, to be retried by hand. |
 | `SECRET_KEY` | unset | app | the Fernet key that encrypts secrets at rest (arr API keys, later cookies). Unset, fetcharr generates `SECRET_KEY_FILE` on first start. |
 | `SECRET_KEY_FILE` | `/config/secret.key` | app | where that key is read from, and written (mode `0600`) when it doesn't exist yet. Keep `/config` backed up: a lost key means re-entering every stored secret. |

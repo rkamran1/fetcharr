@@ -1,5 +1,7 @@
 """Small pure helpers for the jobs domain."""
 
+import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.integrations.arr import Rejection
@@ -51,3 +53,53 @@ def _clock(seconds: float) -> str:
     hours, rest = divmod(total, 3600)
     minutes, secs = divmod(rest, 60)
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+#: The folder replaced files are parked in before the sweep purges them (§7.3).
+REPLACED = "_replaced"
+
+
+def next_run_at(now: datetime, hour: int) -> datetime:
+    """The next time it is `hour` o'clock in `now`'s own timezone (the container's TZ)."""
+    today = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    return today if today > now else today + timedelta(days=1)
+
+
+def sweep_incomplete(incomplete_dir: Path, keep: set[str], cutoff: float) -> list[Path]:
+    """Delete stale job folders, leaving `keep`'s folders and anything newer than `cutoff`.
+
+    `keep` holds the ids of the jobs that still need their folder: everything else in
+    `incomplete/` is a failed or cancelled job, or an orphan with no row at all (§6).
+    Blocking: the caller runs it in a thread.
+    """
+    removed: list[Path] = []
+    if not incomplete_dir.is_dir():
+        return removed
+    for entry in sorted(incomplete_dir.iterdir()):
+        if entry.name == REPLACED:
+            removed.extend(_purge(entry, cutoff, incomplete_dir))
+            continue
+        if not entry.is_dir() or entry.name in keep:
+            continue
+        removed.extend(_remove(entry, cutoff, incomplete_dir))
+    return removed
+
+
+def _purge(replaced: Path, cutoff: float, root: Path) -> list[Path]:
+    if not replaced.is_dir():
+        return []
+    removed: list[Path] = []
+    for entry in sorted(replaced.iterdir()):
+        removed.extend(_remove(entry, cutoff, root))
+    return removed
+
+
+def _remove(entry: Path, cutoff: float, root: Path) -> list[Path]:
+    """Remove one folder or file, but never one that resolves outside `incomplete/`."""
+    if entry.stat().st_mtime >= cutoff or not is_inside(entry, root):
+        return []
+    if entry.is_dir() and not entry.is_symlink():
+        shutil.rmtree(entry, ignore_errors=True)
+    else:
+        entry.unlink(missing_ok=True)
+    return [entry]

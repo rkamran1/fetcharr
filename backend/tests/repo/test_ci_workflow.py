@@ -21,13 +21,39 @@ def _run_lines(job: dict[str, Any]) -> str:
     return "\n".join(step.get("run", "") for step in job["steps"])
 
 
-def test_triggers_are_pull_requests_and_pushes_to_main(workflow: dict[Any, Any]) -> None:
+def test_triggers_include_release_tags_a_weekly_schedule_and_dispatch(
+    workflow: dict[Any, Any],
+) -> None:
     triggers = _triggers(workflow)
 
-    assert set(triggers) == {"pull_request", "push"}
+    assert set(triggers) == {"pull_request", "push", "schedule", "workflow_dispatch"}
     assert triggers["pull_request"]["branches"] == ["main"]
     # Feature-branch pushes are covered by their PR; only main runs on push.
     assert triggers["push"]["branches"] == ["main"]
+    # A release tag publishes the semver tags; the weekly run rebuilds the newest of them.
+    assert triggers["push"]["tags"] == ["v*.*.*"]
+    assert [entry["cron"] for entry in triggers["schedule"]]
+
+
+def test_weekly_job_rebuilds_the_latest_release_tag(workflow: dict[Any, Any]) -> None:
+    weekly = workflow["jobs"]["weekly"]
+
+    assert "schedule" in weekly["if"]
+    assert weekly["needs"] == ["backend", "frontend"]
+    resolve = next(step for step in weekly["steps"] if step.get("id") == "release")
+    assert "git tag --list 'v*.*.*'" in resolve["run"]
+    assert "git checkout --detach" in resolve["run"]
+
+
+def test_weekly_job_publishes_latest(workflow: dict[Any, Any]) -> None:
+    weekly = workflow["jobs"]["weekly"]
+    meta = next(step for step in weekly["steps"] if step.get("id") == "meta")
+    push = next(step for step in weekly["steps"] if step.get("with", {}).get("push") is True)
+
+    assert "type=raw,value=latest" in meta["with"]["tags"]
+    assert GATE in push["if"]
+    # Nothing is built when there is no release tag to rebuild.
+    assert "steps.release.outputs.tag != ''" in push["if"]
 
 
 def test_defines_backend_frontend_image_jobs(workflow: dict[Any, Any]) -> None:

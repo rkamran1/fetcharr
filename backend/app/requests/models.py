@@ -21,4 +21,7 @@ class Request(Base):
     radarr_movie_id: Mapped[int | None] = mapped_column(Integer)
     sonarr_series_id: Mapped[int | None] = mapped_column(Integer)
     options: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # The naming templates and colon mode in force when it was created, so a later
+    # Settings change only affects new requests (§7.2).
+    naming: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

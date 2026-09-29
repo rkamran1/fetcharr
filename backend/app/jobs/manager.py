@@ -7,16 +7,19 @@ and log lines are batched into one insert about once a second.
 
 import asyncio
 import contextlib
+import logging
 import shutil
+import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select, update
 
 from app.config import Settings
+from app.db.backup import backups_dir, nightly_backup
 from app.db.base import utcnow
 from app.db.session import Database
 from app.events.service import EventHub
@@ -24,8 +27,15 @@ from app.integrations.arr import ArrConnection, ImportPolicy, RadarrClient, Sona
 from app.jobs.constants import ACTIVE_STATUSES, JobStatus, Step
 from app.jobs.models import Job, JobLog
 from app.jobs.pipeline import PipelineContext, execute
-from app.jobs.utils import as_stream_type
-from app.library.naming import DailyEpisode, Episode, Movie, Other, Target
+from app.jobs.utils import as_stream_type, next_run_at, sweep_incomplete
+from app.library.naming import (
+    DailyEpisode,
+    Episode,
+    Movie,
+    Other,
+    Target,
+    from_snapshot,
+)
 from app.library.organizer import CollisionPolicy
 from app.requests.models import Request
 from app.settings.service import SettingsService
@@ -38,6 +48,11 @@ from app.ytdlp.runtime import JsRuntime, detect_js_runtime
 from app.ytdlp.schemas import DownloadOptions
 
 #: At most one progress write per job in this window (§3.1 rule 5).
+logger = logging.getLogger("fetcharr")
+
+#: The quiet hour, in the container's TZ, when the sweep and the backup run (§3.1, §6).
+MAINTENANCE_HOUR = 3
+SECONDS_A_DAY = 86_400
 PROGRESS_DB_INTERVAL_S = 2.0
 #: Log lines are buffered in memory and inserted in batches this often.
 LOG_FLUSH_INTERVAL_S = 1.0
@@ -72,6 +87,8 @@ class _Claimed:
     sonarr_episode_id: int | None
     site_key: str | None
     use_cookies: bool
+    #: The naming snapshot from the request row (§7.2); None for rows written before M10b.
+    naming: dict[str, Any] | None
 
     def target(self) -> Target:
         """Arr's own titles for a movie or an episode, the video's own for other (§7.2)."""
@@ -132,6 +149,7 @@ class JobManager:
         self._jobs: dict[str, asyncio.Task[None]] = {}
         self._writes: set[asyncio.Task[None]] = set()
         self._loop: asyncio.Task[None] | None = None
+        self._maintenance: asyncio.Task[None] | None = None
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -140,18 +158,54 @@ class JobManager:
         self.js_runtime, self.aria2c_available = await asyncio.to_thread(_detect_tools)
         await self.recover()
         self._loop = asyncio.create_task(self._run_loop())
+        self._maintenance = asyncio.create_task(self._maintenance_forever())
         self.wake()
 
     async def stop(self) -> None:
-        for task in [self._loop, *self._jobs.values(), *self._writes]:
+        tasks = [self._loop, self._maintenance, *self._jobs.values(), *self._writes]
+        for task in tasks:
             if task is not None:
                 task.cancel()
-        pending = [t for t in [self._loop, *self._jobs.values(), *self._writes] if t is not None]
+        pending = [task for task in tasks if task is not None]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._loop = None
+        self._maintenance = None
         self._jobs.clear()
         self._writes.clear()
+
+    async def _maintenance_forever(self) -> None:
+        """One tick a night: clean up `incomplete/`, then back the database up (§3.1, §6)."""
+        while True:
+            now = datetime.now().astimezone()
+            await asyncio.sleep((next_run_at(now, MAINTENANCE_HOUR) - now).total_seconds())
+            try:
+                await self.run_maintenance()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("the nightly maintenance run failed")
+
+    async def run_maintenance(self, today: date | None = None) -> None:
+        """The nightly tick itself, so a test can run it without waiting for 03:00."""
+        keep = await self._job_dirs_in_use()
+        cutoff = time.time() - self.settings.incomplete_retention_days * SECONDS_A_DAY
+        removed = await asyncio.to_thread(
+            sweep_incomplete, self.settings.incomplete_dir, keep, cutoff
+        )
+        if removed:
+            logger.info("retention sweep removed %d folder(s) from incomplete", len(removed))
+        backups = backups_dir(self.settings.database_url)
+        if backups is not None:
+            await nightly_backup(self.db, backups, today or date.today())
+
+    async def _job_dirs_in_use(self) -> set[str]:
+        """The jobs whose folder must stay: everything but the failed and cancelled ones."""
+        async with self.db.read_session() as session:
+            ids = await session.scalars(
+                select(Job.id).where(Job.status.not_in((JobStatus.FAILED, JobStatus.CANCELLED)))
+            )
+        return set(ids)
 
     def wake(self) -> None:
         """Tell the claim loop there may be new work."""
@@ -235,6 +289,7 @@ class JobManager:
                 sonarr_episode_id=job.sonarr_episode_id,
                 site_key=job.site_key,
                 use_cookies=job.use_cookies,
+                naming=request.naming,
             )
         self.hub.publish(
             "job.state", {"job_id": claimed.id, "status": JobStatus.STARTING, "phase": None}
@@ -289,6 +344,7 @@ class JobManager:
         if job.use_cookies and job.site_key:
             cookies = await self.sites.cookies_for_site(job.site_key)
 
+        templates, colon = from_snapshot(job.naming)
         context = PipelineContext(
             job_id=job.id,
             url=job.url,
@@ -315,6 +371,8 @@ class JobManager:
             last_completed_step=job.last_completed_step,
             completed_path=job.completed_path,
             collision_policy=CollisionPolicy(job.collision_policy),
+            templates=templates,
+            colon=colon,
             import_status=job.import_status,
             radarr_movie_id=job.radarr_movie_id,
             radarr=self.radarr,

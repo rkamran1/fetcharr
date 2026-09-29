@@ -481,3 +481,18 @@ describe('a series page reached by "download again" (M9)', () => {
     )
   })
 })
+
+describe('a series page reached from a shared link (M10b, AC7)', () => {
+  it('fills the first episode row opened, and leaves the rest empty', async () => {
+    const fetchMock = mockSeries()
+    renderApp(`/download/tv/3?url=${encodeURIComponent(URL)}`)
+
+    await openSeason('Season 1')
+
+    const first = await screen.findByLabelText('Video URL for S01E02 · Episode 2 · 2024-03-08')
+    await waitFor(() => expect(first).toHaveValue(URL))
+    // One link is one episode, so no other row takes it.
+    expect(screen.getByLabelText('Video URL for S01E03 · Episode 3 · 2024-03-15')).toHaveValue('')
+    await waitFor(() => expect(sentBodies(fetchMock, 'POST /api/inspect')).toEqual([{ url: URL }]))
+  })
+})

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { searchSonarrSeries, sonarrSeriesQueryKey, type SonarrSeries } from '@/features/arr'
 
+import { useSharedUrl } from '../urlPrefill'
 import Poster from '../components/Poster'
 import { missingEpisodes, missingInSeason } from '../episodes'
 
@@ -24,6 +25,9 @@ function gap(series: SonarrSeries): string {
  */
 export default function MissingSeriesPage() {
   const [query, setQuery] = useState('')
+  // A shared link travels with the series choice, to fill the episode row it opens (§12).
+  const shared = useSharedUrl()
+  const sharedQuery = shared ? `?${new URLSearchParams({ url: shared }).toString()}` : ''
   const queryClient = useQueryClient()
   const key = sonarrSeriesQueryKey(query.trim(), true)
 
@@ -91,7 +95,10 @@ export default function MissingSeriesPage() {
           <ul aria-label="Series missing episodes" className="flex flex-col gap-3">
             {shows.map((show) => (
               <li key={show.id}>
-                <Link to={`/download/tv/${show.id}`} className="rounded-xl focus-visible:ring-2">
+                <Link
+                  to={`/download/tv/${show.id}${sharedQuery}`}
+                  className="rounded-xl focus-visible:ring-2"
+                >
                   <Card className="hover:border-primary transition-colors">
                     <CardContent className="flex items-center gap-4">
                       <Poster url={show.poster} className="w-16" />

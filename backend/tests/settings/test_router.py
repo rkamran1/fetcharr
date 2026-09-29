@@ -1,16 +1,20 @@
 """GET/PATCH /api/settings: secrets go in, never out (requirements §11, AC1)."""
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
 from app.config import Settings
+from app.library.naming import DEFAULT_TEMPLATES
 from app.main import create_app
 from app.settings.models import Setting
 from app.settings.utils import decrypt
+from app.ytdlp import runtime
 from tests.conftest import (
     RADARR_API_KEY,
     RADARR_URL,
@@ -24,6 +28,8 @@ from tests.conftest import (
 
 #: §4.1's calibrated starting points, before anyone changes them in Settings.
 DEFAULT_TRANSCODE_QUALITY = {"hevc-qsv": 24, "hevc-vaapi": 24, "x265-software": 23}
+#: The §7.2 templates as Settings reports them when nothing has been changed.
+DEFAULT_NAMING = asdict(DEFAULT_TEMPLATES)
 
 
 async def _rows(app: FastAPI) -> dict[str, Setting]:
@@ -59,6 +65,8 @@ async def test_get_never_returns_the_api_key(client: httpx.AsyncClient) -> None:
         "sonarr_api_key_set": False,
         "sonarr_from_env": False,
         "transcode_quality": DEFAULT_TRANSCODE_QUALITY,
+        "naming_templates": DEFAULT_NAMING,
+        "colon_mode": "smart",
     }
     assert RADARR_API_KEY not in json.dumps(response.json())
 
@@ -76,6 +84,8 @@ async def test_get_before_anything_is_configured(client: httpx.AsyncClient) -> N
         "sonarr_api_key_set": False,
         "sonarr_from_env": False,
         "transcode_quality": DEFAULT_TRANSCODE_QUALITY,
+        "naming_templates": DEFAULT_NAMING,
+        "colon_mode": "smart",
     }
 
 
@@ -101,6 +111,8 @@ async def test_env_values_override_stored_ones(settings: Settings, static_dir: P
         "sonarr_api_key_set": False,
         "sonarr_from_env": False,
         "transcode_quality": DEFAULT_TRANSCODE_QUALITY,
+        "naming_templates": DEFAULT_NAMING,
+        "colon_mode": "smart",
     }
 
 
@@ -222,3 +234,105 @@ async def test_an_unknown_profile_or_a_silly_quality_is_rejected(
     assert (await client.get("/api/settings")).json()["transcode_quality"] == (
         DEFAULT_TRANSCODE_QUALITY
     )
+
+
+async def test_naming_update_with_unknown_token_is_422(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+
+    response = await client.patch(
+        "/api/settings", json={"naming_templates": {"standard_episode": "{Episode}"}}
+    )
+
+    assert response.status_code == 422
+    assert "{Episode}" in response.json()["detail"]
+
+
+async def test_an_unknown_colon_mode_is_422(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+
+    assert (await client.patch("/api/settings", json={"colon_mode": "sideways"})).status_code == 422
+
+
+async def test_naming_reset_restores_the_defaults(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+    changed = await client.patch("/api/settings", json={"naming_templates": {"other": "{Title}"}})
+    assert changed.json()["naming_templates"]["other"] == "{Title}"
+
+    reset = await client.patch("/api/settings", json={"naming_templates": {}})
+
+    assert reset.json()["naming_templates"] == DEFAULT_NAMING
+    assert reset.json()["colon_mode"] == "smart"
+
+
+async def test_naming_preview_follows_the_colon_mode(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+
+    smart = await client.post("/api/settings/naming/preview", json={"colon_mode": "smart"})
+    deleted = await client.post("/api/settings/naming/preview", json={"colon_mode": "delete"})
+
+    assert smart.status_code == 200
+    assert set(smart.json()["examples"]) == {"movie", "episode", "specials", "daily", "other"}
+    assert smart.json()["examples"]["other"] != deleted.json()["examples"]["other"]
+
+
+async def test_naming_preview_reports_an_unknown_token(client: httpx.AsyncClient) -> None:
+    await setup_account(client)
+
+    response = await client.post(
+        "/api/settings/naming/preview", json={"templates": {"other": "{Nope}"}}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["errors"]["other"].startswith("{Nope}")
+
+
+async def test_naming_preview_requires_session(client: httpx.AsyncClient) -> None:
+    assert (await client.post("/api/settings/naming/preview", json={})).status_code == 401
+
+
+async def test_ytdlp_update_returns_versions(client: httpx.AsyncClient, ytdlp_venv: Path) -> None:
+    await setup_account(client)
+
+    response = await client.post("/api/settings/yt-dlp/update")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "old": "2026.09.01",
+        "new": "2026.09.20",
+        "output": "Successfully installed yt-dlp-2026.09.20",
+    }
+
+
+async def test_ytdlp_update_reports_a_failure_as_502(
+    client: httpx.AsyncClient, ytdlp_venv: Path
+) -> None:
+    (ytdlp_venv / "bin" / "pip").write_text("#!/bin/sh\necho 'no network' >&2\nexit 1\n")
+    (ytdlp_venv / "bin" / "pip").chmod(0o755)
+    await setup_account(client)
+
+    response = await client.post("/api/settings/yt-dlp/update")
+
+    assert response.status_code == 502
+    assert "no network" in response.json()["detail"]
+
+
+async def test_ytdlp_update_requires_session(client: httpx.AsyncClient) -> None:
+    assert (await client.post("/api/settings/yt-dlp/update")).status_code == 401
+
+
+@pytest.fixture
+def ytdlp_venv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A stand-in for /opt/yt-dlp whose pip "installs" a newer yt-dlp."""
+    root = tmp_path / "opt" / "yt-dlp"
+    (root / "bin").mkdir(parents=True)
+    marker = root / "installed"
+    for name, body in (
+        ("pip", f"touch {marker}\necho 'Successfully installed yt-dlp-2026.09.20'"),
+        ("yt-dlp", f"if [ -f {marker} ]; then echo 2026.09.20; else echo 2026.09.01; fi"),
+    ):
+        exe = root / "bin" / name
+        exe.write_text(f"#!/bin/sh\n{body}\n")
+        exe.chmod(0o755)
+    monkeypatch.setattr(runtime, "YTDLP_PIP", root / "bin" / "pip")
+    monkeypatch.setattr(runtime, "YTDLP_BIN", root / "bin" / "yt-dlp")
+    return root

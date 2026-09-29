@@ -17,7 +17,17 @@ from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.manager import JobManager
 from app.jobs.models import Job
 from app.jobs.service import JobService
-from app.library.naming import DailyEpisode, Episode, Movie, Other, Target, build_path
+from app.library.naming import (
+    ColonMode,
+    DailyEpisode,
+    Episode,
+    Movie,
+    Other,
+    Target,
+    Templates,
+    build_path,
+    snapshot,
+)
 from app.requests.exceptions import InspectionNotFound, RequestNotFound, UnnameableVideo
 from app.requests.models import Request
 from app.requests.schemas import (
@@ -34,6 +44,7 @@ from app.requests.schemas import (
     TvMedia,
 )
 from app.requests.utils import estimated_quality, fts_match, search_words
+from app.settings.service import SettingsService
 from app.ytdlp.schemas import DownloadOptions
 
 
@@ -45,15 +56,19 @@ class RequestService:
         hub: EventHub,
         manager: JobManager,
         jobs: JobService,
+        settings_service: SettingsService,
     ) -> None:
         self.db = db
         self.settings = settings
         self.hub = hub
         self.manager = manager
         self.jobs = jobs
+        self.settings_service = settings_service
 
     async def create(self, body: CreateRequest) -> CreatedRequest:
         rows = [await self._inspection_row(item.inspection_id) for item in body.items]
+        # Read once, before the write session: the request keeps the naming it was made with.
+        templates, colon = await self.settings_service.naming()
         infos = [info for info, _site in rows]
         request_id = str(uuid.uuid4())
         now = utcnow()
@@ -77,6 +92,7 @@ class RequestService:
                     radarr_movie_id=movie.radarr_movie_id if movie else None,
                     sonarr_series_id=series.sonarr_series_id if series else None,
                     options=body.options.model_dump(),
+                    naming=snapshot(templates, colon),
                     created_at=now,
                 )
             )
@@ -162,7 +178,8 @@ class RequestService:
 
     async def preview(self, body: PreviewRequest) -> PathPreview:
         info = await self._inspection(body.inspection_id)
-        path = self._path_for(info, body.options, body, body.episode)
+        templates, colon = await self.settings_service.naming()
+        path = self._path_for(info, body.options, body, templates, colon, body.episode)
         # A stat is blocking, and the answer decides whether the wizard has to ask (§3.2).
         exists = await asyncio.to_thread(path.is_file)
         return PathPreview(path=str(path), exists=exists)
@@ -184,12 +201,20 @@ class RequestService:
         info: dict[str, Any],
         options: DownloadOptions,
         details: MediaDetails,
+        templates: Templates,
+        colon: ColonMode,
         episode: EpisodeRef | None = None,
     ) -> Path:
         target = target_for(details, info, episode)
         try:
             # The real quality is only known after ffprobe, so the preview estimates it (§7.2).
-            relative = build_path(target, estimated_quality(info, options), f".{options.container}")
+            relative = build_path(
+                target,
+                estimated_quality(info, options),
+                f".{options.container}",
+                templates,
+                colon,
+            )
         except ValueError as error:
             raise UnnameableVideo(str(error)) from error
         return self.settings.completed_dir / relative

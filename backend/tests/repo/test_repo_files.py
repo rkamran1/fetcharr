@@ -1,7 +1,10 @@
+import json
 import subprocess
 from pathlib import Path
 
 import yaml
+
+from app.config import Settings
 
 # The /dev-workflow-loop verification table; CLAUDE.md must list every one of these.
 VERIFICATION_COMMANDS = [
@@ -233,3 +236,76 @@ def test_compose_mounts_web_downloads_volume(repo_root: Path) -> None:
 
     # completed/ and incomplete/ share the /web-downloads volume; no /data mount any more.
     assert targets == ["/config", "/web-downloads"]
+
+
+def test_retention_and_update_settings_documented(repo_root: Path) -> None:
+    compose = (repo_root / "docker-compose.example.yml").read_text()
+    readme_rows = [
+        line for line in (repo_root / "README.md").read_text().splitlines() if line.startswith("|")
+    ]
+    fields = Settings.model_fields
+
+    for name, default in (("INCOMPLETE_RETENTION_DAYS", "7"), ("YTDLP_UPDATE_ON_START", "true")):
+        assert f"{name}={default}" in compose
+        assert any(row.startswith(f"| `{name}` | `{default}` |") for row in readme_rows)
+        assert name.lower() in fields
+
+
+def test_timezone_documented(repo_root: Path) -> None:
+    """TZ is read by libc, not by Settings, but it decides when the nightly run happens."""
+    compose = (repo_root / "docker-compose.example.yml").read_text()
+    row = next(
+        line
+        for line in (repo_root / "README.md").read_text().splitlines()
+        if line.startswith("| `TZ` |")
+    )
+
+    assert "TZ=" in compose
+    assert "03:00" in row
+
+
+def test_entrypoint_updates_ytdlp_without_failing_startup(repo_root: Path) -> None:
+    entrypoint = (repo_root / "docker" / "entrypoint.sh").read_text()
+    update = entrypoint.split("YTDLP_UPDATE_ON_START=", 1)[1].split("cd /app", 1)[0]
+
+    assert 'YTDLP_UPDATE_ON_START="${YTDLP_UPDATE_ON_START:-true}"' in entrypoint
+    # Only the yt-dlp venv is touched, as the app user, under a timeout.
+    assert "/opt/yt-dlp/bin/pip install --quiet --upgrade yt-dlp" in update
+    assert "timeout 180 gosu app" in update
+    # `set -eu` is on, so the failure path has to end in something that succeeds.
+    assert "|| echo" in update
+
+
+def test_the_app_user_owns_the_ytdlp_venv(repo_root: Path) -> None:
+    """Otherwise neither the entrypoint nor the in-app update could write to it (§13.1)."""
+    dockerfile = (repo_root / "Dockerfile").read_text()
+
+    assert "chown -R app:app /opt/yt-dlp" in dockerfile
+
+
+def test_manifest_declares_a_share_target(repo_root: Path) -> None:
+    manifest = json.loads((repo_root / "frontend" / "public" / "manifest.webmanifest").read_text())
+    index = (repo_root / "frontend" / "index.html").read_text()
+
+    assert manifest["name"] and manifest["short_name"]
+    assert manifest["display"] == "standalone"
+    assert manifest["start_url"] == "/"
+    assert manifest["theme_color"] and manifest["background_color"]
+    sizes = {icon["sizes"] for icon in manifest["icons"]}
+    assert {"192x192", "512x512"} <= sizes
+    assert any("maskable" in icon.get("purpose", "") for icon in manifest["icons"])
+    share = manifest["share_target"]
+    assert share["action"] == "/share"
+    assert share["method"] == "GET"
+    assert share["params"] == {"url": "url", "text": "text", "title": "title"}
+    assert 'rel="manifest"' in index and "manifest.webmanifest" in index
+
+
+def test_manifest_icons_exist(repo_root: Path) -> None:
+    public = repo_root / "frontend" / "public"
+    manifest = json.loads((public / "manifest.webmanifest").read_text())
+
+    for icon in manifest["icons"]:
+        path = public / icon["src"].lstrip("/")
+        assert path.is_file(), icon["src"]
+        assert path.read_bytes().startswith(b"\x89PNG")

@@ -22,4 +22,37 @@ export type TranscodeReport = {
   profiles: ProfileCheck[]
 }
 
-export type SystemStatus = { version: string; paths: PathReport; transcode: TranscodeReport }
+/** The binaries the downloads lean on; null means the tool isn't installed. */
+export type Tools = {
+  ytdlp: string | null
+  ffmpeg: string | null
+  deno: string | null
+  js_runtime: string | null
+  aria2c: boolean
+  /** Whether the container upgrades yt-dlp before it starts (§13.1). */
+  update_on_start: boolean
+}
+
+export type DatabaseStatus = { path: string; size_bytes: number | null; last_backup: string | null }
+
+/** Sized from the environment at startup, so Settings and Status show them read-only. */
+export type Concurrency = { downloads: number; transcodes: number }
+
+export type ArrStatus = {
+  configured: boolean
+  ok: boolean
+  version: string | null
+  error: string | null
+}
+
+/** The full status report (§11), everything the Status page shows. */
+export type SystemStatus = {
+  version: string
+  tools: Tools
+  paths: PathReport
+  transcode: TranscodeReport
+  database: DatabaseStatus
+  concurrency: Concurrency
+  radarr: ArrStatus
+  sonarr: ArrStatus
+}

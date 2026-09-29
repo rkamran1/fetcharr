@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     max_concurrent_transcodes: int = 1
     # Which libva driver ffmpeg loads for QSV/VAAPI; iHD is the Intel one (§13.1).
     libva_driver_name: str = "iHD"
+    # How long a failed, cancelled or orphaned job folder stays in incomplete/ (§6).
+    incomplete_retention_days: int = 7
+    # Whether the container upgrades yt-dlp before starting; the entrypoint reads it (§13.1).
+    ytdlp_update_on_start: bool = True
     # Resume interrupted jobs from their checkpoint on boot; false fails them instead.
     auto_resume: bool = True
     # The Fernet key for secrets at rest (§8). Set it, or let the file below be generated.

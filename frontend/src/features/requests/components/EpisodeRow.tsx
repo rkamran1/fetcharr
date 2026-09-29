@@ -10,6 +10,7 @@ import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
 import { usePrefill, type Prefill } from '../again'
+import { useClaimedUrlPrefill } from '../urlPrefill'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import { episodeLabel } from '../episodes'
 import { DEFAULT_OPTIONS } from '../types'
@@ -21,6 +22,8 @@ type Props = {
   media: TvMedia
   /** "Download again" for this episode: its old URL, inspected, with its old options. */
   prefill?: Prefill | null
+  /** Claims the URL shared into fetcharr, if no other row has taken it yet (§12). */
+  takeSharedUrl?: () => string | null
 }
 
 function episodeRef(episode: SonarrEpisode): EpisodeRef {
@@ -40,7 +43,7 @@ function episodeRef(episode: SonarrEpisode): EpisodeRef {
  * Everything here belongs to one link. Two rows in the same season are inspected
  * separately and can be downloaded at different qualities.
  */
-export default function EpisodeRow({ episode, media, prefill = null }: Props) {
+export default function EpisodeRow({ episode, media, prefill = null, takeSharedUrl }: Props) {
   const [url, setUrl] = useState('')
   const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
   const [useCookies, setUseCookies] = useState(true)
@@ -57,6 +60,11 @@ export default function EpisodeRow({ episode, media, prefill = null }: Props) {
     setUrl(job.url)
     setOptions(options)
     inspection.mutate(job.url)
+  })
+  // The first row of the first season opened takes a shared link; the rest start empty.
+  useClaimedUrlPrefill(prefill ? null : takeSharedUrl, (shared) => {
+    setUrl(shared)
+    inspection.mutate(shared)
   })
 
   const previewBody: PreviewRequest | null =

@@ -1,6 +1,7 @@
 """The durable pipeline end to end: progress, throttling, cancel, concurrency, recovery."""
 
 import asyncio
+import os
 import time
 from collections.abc import Callable
 from datetime import date
@@ -568,3 +569,55 @@ async def test_embedded_subtitles_leave_no_sidecar(
     assert job.status == JobStatus.COMPLETED, job.error_message
     assert job.sidecar_paths == []
     assert names(settings.completed_dir / "other") == ["Big Buck Bunny [abc123].mkv"]
+
+
+# --------------------------------------------------- AC5/AC6: the nightly maintenance tick
+
+
+async def _aged_dir(root: Path, name: str, days: float) -> Path:
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "video.part").write_text("x")
+    old = time.time() - days * 86_400
+    os.utime(folder, (old, old))
+    return folder
+
+
+async def test_maintenance_sweeps_incomplete_and_backs_up(
+    make_manager: Callable[..., JobManager],
+    db: Database,
+    settings: Settings,
+    new_job: Callable[..., Any],
+    tmp_path: Path,
+) -> None:
+    manager = make_manager()
+    running = await new_job(status=JobStatus.DOWNLOADING)
+    failed = await new_job(status=JobStatus.FAILED)
+    incomplete = settings.incomplete_dir
+    running_dir = await _aged_dir(incomplete, running, 30)
+    failed_dir = await _aged_dir(incomplete, failed, 30)
+    orphan_dir = await _aged_dir(incomplete, "no-such-job", 30)
+    recent_dir = await _aged_dir(incomplete, "fresh-orphan", 1)
+
+    await manager.run_maintenance(date(2026, 5, 4))
+
+    assert running_dir.is_dir()
+    assert recent_dir.is_dir()
+    assert not failed_dir.exists()
+    assert not orphan_dir.exists()
+    backups = tmp_path / "backups"
+    assert [path.name for path in backups.glob("fetcharr-*.db")] == ["fetcharr-2026-05-04.db"]
+
+
+async def test_start_schedules_the_maintenance_tick_and_stop_cancels_it(
+    make_manager: Callable[..., JobManager],
+) -> None:
+    manager = make_manager()
+
+    await manager.start()
+    task = manager._maintenance
+    assert task is not None and not task.done()
+
+    await manager.stop()
+    assert manager._maintenance is None
+    assert task.cancelled()

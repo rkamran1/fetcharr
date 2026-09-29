@@ -7,6 +7,7 @@ import { searchSonarrSeries, sonarrSeriesQueryKey } from '@/features/arr'
 import { usePrefill, useDownloadAgain } from '../again'
 import Poster from '../components/Poster'
 import SeasonSection from '../components/SeasonSection'
+import { useTakeSharedUrl } from '../urlPrefill'
 import { missingInSeason } from '../episodes'
 import type { TvMedia } from '../types'
 
@@ -18,6 +19,7 @@ import type { TvMedia } from '../types'
 export default function SeriesPage() {
   const params = useParams()
   const seriesId = Number(params.seriesId)
+  const takeSharedUrl = useTakeSharedUrl()
   const [showAll, setShowAll] = useState(false)
   // "Download again" from History: the episode may be in Sonarr by now, so show it all.
   const again = useDownloadAgain()
@@ -81,6 +83,7 @@ export default function SeriesPage() {
                 media={media}
                 showAll={showAll}
                 prefill={again?.job.season === season.number ? again : null}
+                takeSharedUrl={takeSharedUrl}
               />
             </li>
           ))}

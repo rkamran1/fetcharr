@@ -13,6 +13,7 @@ const NAV = [
   { to: '/presets', label: 'Presets' },
   { to: '/cookies', label: 'Cookies' },
   { to: '/settings', label: 'Settings' },
+  { to: '/status', label: 'Status' },
 ]
 
 export default function AppShell() {

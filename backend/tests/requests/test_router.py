@@ -19,6 +19,7 @@ from app.db.session import Database
 from app.inspections.models import Inspection
 from app.jobs.constants import ImportStatus, JobStatus
 from app.jobs.models import Job
+from app.library.naming import DEFAULT_TEMPLATES, ColonMode, from_snapshot
 from app.requests.models import Request
 from tests.conftest import make_client, setup_account
 from tests.fake_ytdlp import FakeYtdlp
@@ -875,3 +876,66 @@ async def test_list_is_fast_on_5000_jobs(
     assert body["total"] == len([n for n in range(2500) if str(n).startswith("12") and n % 3 == 1])
     assert all(item["media_type"] == "tv" for item in body["items"])
     assert min(timings) < 0.1, timings
+
+
+async def _request_naming(app: FastAPI, request_id: str) -> dict[str, Any] | None:
+    async with app.state.db.read_session() as session:
+        row = await session.get(Request, request_id)
+        assert row is not None
+        return row.naming
+
+
+async def test_request_snapshots_the_naming_settings(
+    app: FastAPI, signed_in: httpx.AsyncClient, add_inspection: Callable[..., Any]
+) -> None:
+    await signed_in.patch("/api/settings", json={"naming_templates": {"other": "{Id} - {Title}"}})
+    inspection_id = await add_inspection()
+
+    created = await signed_in.post(
+        "/api/requests",
+        json={
+            "media_type": "other",
+            "items": [{"inspection_id": inspection_id}],
+            "options": OPTIONS,
+        },
+    )
+
+    templates, colon = from_snapshot(await _request_naming(app, created.json()["id"]))
+    assert templates.other == "{Id} - {Title}"
+    assert colon == ColonMode.SMART
+
+
+async def test_template_change_does_not_affect_an_existing_request(
+    app: FastAPI, signed_in: httpx.AsyncClient, add_inspection: Callable[..., Any]
+) -> None:
+    body = {
+        "media_type": "other",
+        "items": [{"inspection_id": await add_inspection()}],
+        "options": OPTIONS,
+    }
+    before = await signed_in.post("/api/requests", json=body)
+
+    await signed_in.patch("/api/settings", json={"naming_templates": {"other": "{Id}"}})
+    body["items"] = [{"inspection_id": await add_inspection()}]
+    after = await signed_in.post("/api/requests", json=body)
+
+    old, _ = from_snapshot(await _request_naming(app, before.json()["id"]))
+    new, _ = from_snapshot(await _request_naming(app, after.json()["id"]))
+    assert old.other == DEFAULT_TEMPLATES.other
+    assert new.other == "{Id}"
+
+
+async def test_preview_follows_the_naming_settings(
+    signed_in: httpx.AsyncClient, settings: Settings, add_inspection: Callable[..., Any]
+) -> None:
+    inspection_id = await add_inspection(title="Some: Video")
+    await signed_in.patch(
+        "/api/settings", json={"naming_templates": {"other": "{Title}"}, "colon_mode": "delete"}
+    )
+
+    response = await signed_in.post(
+        "/api/preview",
+        json={"media_type": "other", "inspection_id": inspection_id, "options": OPTIONS},
+    )
+
+    assert response.json()["path"] == str(settings.completed_dir / "other" / "Some Video.mkv")

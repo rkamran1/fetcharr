@@ -11,6 +11,7 @@ import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
 import { usePrefill, useDownloadAgain, useIsDownloadAgain } from '../again'
+import { useSharedUrlPrefill } from '../urlPrefill'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import MissingMoviePicker from '../components/MissingMoviePicker'
@@ -64,6 +65,13 @@ export default function MovieWizardPage() {
     setUrl(job.url)
     setOptions(options)
     inspection.mutate(job.url)
+  })
+
+  // A link shared from the phone (§12): the URL only, so the movie is still picked here.
+  useSharedUrlPrefill((shared) => {
+    setTab('url')
+    setUrl(shared)
+    inspection.mutate(shared)
   })
 
   const previewBody: PreviewRequest | null =

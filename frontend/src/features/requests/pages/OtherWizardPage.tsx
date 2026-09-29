@@ -11,6 +11,7 @@ import { InspectCard, inspect } from '@/features/inspections'
 import { CookiesChip } from '@/features/sites'
 
 import { usePrefill, useDownloadAgain, useIsDownloadAgain } from '../again'
+import { useSharedUrlPrefill } from '../urlPrefill'
 import { createRequest, previewPath, previewQueryKey } from '../api'
 import DownloadOptionsFields from '../components/DownloadOptionsFields'
 import { DEFAULT_OPTIONS } from '../types'
@@ -31,6 +32,11 @@ export default function OtherWizardPage() {
     setUrl(job.url)
     setOptions(options)
     inspection.mutate(job.url)
+  })
+  // A link shared from the phone (§12): the URL only, so the default preset still applies.
+  useSharedUrlPrefill((shared) => {
+    setUrl(shared)
+    inspection.mutate(shared)
   })
 
   const previewBody: PreviewRequest = {

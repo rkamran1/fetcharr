@@ -132,4 +132,53 @@ names = [r[0] for r in sqlite3.connect('/config/backups/$newest').execute(\"SELE
 sys.exit(0 if 'seed' in names else 1)" || fail "backup: newest backup lacks the seeded table"
 pass "backup: 5 kept, newest $newest"
 
+# --- update on start: the yt-dlp upgrade must never keep the app from starting (§13.1) ---
+wait_healthy_inside() {  # container
+  for _ in $(seq 1 60); do
+    if docker exec "$1" python -c "
+import urllib.request
+urllib.request.urlopen('http://127.0.0.1:8000/healthz').read()" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  docker logs "$1" >&2 || true
+  return 1
+}
+
+# Offline: the update is attempted, and whatever pip makes of that, the app comes up.
+offline="$RUN_ID-offline"
+CONTAINERS+=("$offline")
+docker run -d --platform linux/amd64 --name "$offline" --network none "$IMAGE" >/dev/null
+wait_healthy_inside "$offline" || fail "update-on-start: the offline container never became healthy"
+case "$(docker logs "$offline" 2>&1)" in
+  *"yt-dlp update: starting"*) ;;
+  *) fail "update-on-start: the entrypoint did not try to update yt-dlp" ;;
+esac
+docker exec "$offline" /opt/yt-dlp/bin/yt-dlp --version >/dev/null \
+  || fail "update-on-start: yt-dlp is broken after an offline update"
+# The venv belongs to the app user, or neither this nor the in-app update could write to it.
+venv_owner="$(docker exec "$offline" stat -c %u:%g /opt/yt-dlp/bin)"
+[ "$venv_owner" = "1000:1000" ] || fail "update-on-start: /opt/yt-dlp is owned by $venv_owner"
+docker rm -f "$offline" >/dev/null
+
+# A pip that fails outright: `set -e` must not carry that failure into the startup.
+pip_dir="$(mktemp -d)"
+printf '#!/bin/sh\necho "could not reach the index" >&2\nexit 1\n' > "$pip_dir/pip"
+chmod 0755 "$pip_dir/pip"
+broken="$RUN_ID-broken-pip"
+CONTAINERS+=("$broken")
+docker run -d --platform linux/amd64 --name "$broken" \
+  -v "$pip_dir/pip:/opt/yt-dlp/bin/pip:ro" "$IMAGE" >/dev/null
+wait_healthy_inside "$broken" || fail "update-on-start: a failed update stopped the app"
+case "$(docker logs "$broken" 2>&1)" in
+  *"yt-dlp update: skipped"*) ;;
+  *) fail "update-on-start: a failed update was not reported as skipped" ;;
+esac
+docker exec "$broken" /opt/yt-dlp/bin/yt-dlp --version >/dev/null \
+  || fail "update-on-start: yt-dlp is broken after a failed update"
+docker rm -f "$broken" >/dev/null
+rm -rf "$pip_dir"
+pass "update-on-start: attempted offline, and a failing pip still starts the app"
+
 echo "all image checks passed"

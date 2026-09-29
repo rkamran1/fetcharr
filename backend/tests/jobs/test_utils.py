@@ -1,7 +1,16 @@
+import os
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.integrations.arr import Rejection
-from app.jobs.utils import as_stream_type, explain_rejection, is_inside
+from app.jobs.utils import (
+    as_stream_type,
+    explain_rejection,
+    is_inside,
+    next_run_at,
+    sweep_incomplete,
+)
 
 
 def test_as_stream_type_falls_back_to_http() -> None:
@@ -69,3 +78,99 @@ def test_other_rejections_are_left_as_the_app_said_them() -> None:
     rejection = Rejection(reason="Not an upgrade for existing movie file(s)", permanent=True)
 
     assert explain_rejection(rejection, "Radarr", 5000) is None
+
+
+def _aged(path: Path, days: float) -> Path:
+    """A folder or file whose mtime is `days` old, as the sweep reads it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.mkdir() if not path.suffix else path.write_text("x")
+    old = time.time() - days * 86_400
+    os.utime(path, (old, old))
+    return path
+
+
+CUTOFF_DAYS = 7
+
+
+def _cutoff() -> float:
+    return time.time() - CUTOFF_DAYS * 86_400
+
+
+def test_next_run_at_is_later_today_when_the_hour_is_still_ahead() -> None:
+    now = datetime(2026, 5, 4, 1, 30, tzinfo=UTC)
+
+    assert next_run_at(now, 3) == datetime(2026, 5, 4, 3, 0, tzinfo=UTC)
+
+
+def test_next_run_at_is_tomorrow_once_the_hour_has_passed() -> None:
+    now = datetime(2026, 5, 4, 3, 0, 1, tzinfo=UTC)
+
+    assert next_run_at(now, 3) == datetime(2026, 5, 5, 3, 0, tzinfo=UTC)
+
+
+def test_sweep_removes_old_failed_and_cancelled_dirs(tmp_path: Path) -> None:
+    incomplete = tmp_path / "incomplete"
+    failed = _aged(incomplete / "failed-job", 8)
+    cancelled = _aged(incomplete / "cancelled-job", 30)
+
+    removed = sweep_incomplete(incomplete, set(), _cutoff())
+
+    assert set(removed) == {failed, cancelled}
+    assert not failed.exists() and not cancelled.exists()
+
+
+def test_sweep_removes_old_orphan_dirs(tmp_path: Path) -> None:
+    incomplete = tmp_path / "incomplete"
+    orphan = _aged(incomplete / "no-such-job", 9)
+
+    assert sweep_incomplete(incomplete, {"running-job"}, _cutoff()) == [orphan]
+    assert not orphan.exists()
+
+
+def test_sweep_keeps_recent_and_running_dirs(tmp_path: Path) -> None:
+    incomplete = tmp_path / "incomplete"
+    running = _aged(incomplete / "running-job", 30)
+    recent = _aged(incomplete / "recent-job", 1)
+
+    assert sweep_incomplete(incomplete, {"running-job"}, _cutoff()) == []
+    assert running.is_dir() and recent.is_dir()
+
+
+def test_sweep_purges_old_replaced_files(tmp_path: Path) -> None:
+    incomplete = tmp_path / "incomplete"
+    old_file = _aged(incomplete / "_replaced" / "old.mkv", 8)
+    old_dir = _aged(incomplete / "_replaced" / "old-folder", 8)
+    kept = _aged(incomplete / "_replaced" / "new.mkv", 1)
+    _aged(incomplete / "_replaced", 30)
+
+    removed = sweep_incomplete(incomplete, set(), _cutoff())
+
+    assert set(removed) == {old_file, old_dir}
+    assert kept.is_file()
+    # The parking folder itself stays, however old it is.
+    assert (incomplete / "_replaced").is_dir()
+
+
+def test_sweep_leaves_completed_alone(tmp_path: Path) -> None:
+    incomplete = tmp_path / "incomplete"
+    incomplete.mkdir()
+    completed = _aged(tmp_path / "completed" / "movies", 400)
+
+    assert sweep_incomplete(incomplete, set(), _cutoff()) == []
+    assert completed.is_dir()
+
+
+def test_sweep_never_follows_a_link_out_of_incomplete(tmp_path: Path) -> None:
+    incomplete = tmp_path / "incomplete"
+    incomplete.mkdir()
+    outside = _aged(tmp_path / "elsewhere", 400)
+    link = incomplete / "escape"
+    link.symlink_to(outside, target_is_directory=True)
+
+    assert sweep_incomplete(incomplete, set(), _cutoff()) == []
+    assert outside.is_dir()
+
+
+def test_sweep_without_an_incomplete_dir_does_nothing(tmp_path: Path) -> None:
+    assert sweep_incomplete(tmp_path / "missing", set(), _cutoff()) == []

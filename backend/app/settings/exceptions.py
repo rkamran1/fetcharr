@@ -10,3 +10,8 @@ class SettingsError(Exception):
 class InvalidSetting(SettingsError):
     def __init__(self, detail: str) -> None:
         super().__init__(422, detail)
+
+
+class YtdlpUpdateFailed(SettingsError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(502, detail)
