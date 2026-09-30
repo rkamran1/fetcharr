@@ -215,6 +215,57 @@ def test_entrypoint_prepares_the_download_folders(repo_root: Path) -> None:
     assert "chown -R" not in entrypoint
 
 
+def _deploy_section(repo_root: Path) -> str:
+    return (repo_root / "README.md").read_text().split("## Deploy", 1)[1].split("\n## ", 1)[0]
+
+
+def test_readme_documents_publishing_from_the_mac(repo_root: Path) -> None:
+    """CI never publishes, so the README is the only place the release ritual is written down."""
+    deploy = _deploy_section(repo_root)
+
+    assert "scripts/publish.sh edge" in deploy
+    assert "scripts/publish.sh v0.1.0" in deploy
+    # Both tokens, and which one goes where: the server never gets a writable token.
+    assert "Read & Write" in deploy and "Read-only" in deploy
+    assert "docker login -u <user>" in deploy
+    # The reason the script exists at all (§13.3).
+    assert "linux/amd64" in deploy
+
+
+def test_readme_documents_the_deploy_and_update_flow(repo_root: Path) -> None:
+    deploy = _deploy_section(repo_root)
+
+    assert "docker compose pull fetcharr && docker compose up -d fetcharr" in deploy
+    assert "DOCKERHUB_REPO=<user>/fetcharr" in deploy
+    # The two things that break an arr import if they are wrong (§7.1, §7.6).
+    assert "`/web-downloads` in Radarr and Sonarr too" in deploy
+    assert "`PUID`, `PGID` and `UMASK`" in deploy
+    # And how you tell the new image is the one running.
+    assert "footer" in deploy
+
+
+def test_readme_documents_rollback_by_pinning_a_tag(repo_root: Path) -> None:
+    deploy = _deploy_section(repo_root)
+    rollback = deploy.split("### Roll back", 1)[1]
+
+    assert "docker.io/${DOCKERHUB_REPO}:0.1.0" in rollback
+    assert "docker compose up -d fetcharr" in rollback
+    assert "footer" in rollback
+
+
+def test_compose_image_references_the_repo_variable(repo_root: Path) -> None:
+    compose = yaml.safe_load((repo_root / "docker-compose.example.yml").read_text())
+    line = next(
+        raw
+        for raw in (repo_root / "docker-compose.example.yml").read_text().splitlines()
+        if raw.strip().startswith("image:")
+    )
+
+    assert compose["services"]["fetcharr"]["image"] == "docker.io/${DOCKERHUB_REPO}:latest"
+    # A pinned major is the way to avoid a surprise update when the whole stack is pulled.
+    assert ":1" in line.split("#", 1)[1]
+
+
 def test_readme_documents_running_the_backend_on_the_host(repo_root: Path) -> None:
     development = (repo_root / "README.md").read_text().split("## Development", 1)[1]
 

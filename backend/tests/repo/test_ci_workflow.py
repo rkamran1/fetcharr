@@ -84,13 +84,41 @@ def test_dockerhub_steps_gated_by_repo_variable(workflow: dict[Any, Any]) -> Non
     assert all(GATE in step.get("if", "") for step in publishing)
 
 
-def test_image_job_runs_only_when_publishing(workflow: dict[Any, Any]) -> None:
-    # Until D1 enables publishing, CI skips the image job on PRs and main alike.
-    condition = workflow["jobs"]["image"]["if"]
+def test_image_job_builds_and_checks_on_pull_requests(workflow: dict[Any, Any]) -> None:
+    """CI never publishes (D1: the owner publishes from their Mac), but it must still catch a
+    broken Dockerfile before a hand-rolled publish, so the job runs unconditionally."""
+    image = workflow["jobs"]["image"]
 
-    assert condition == GATE
+    assert "if" not in image
     assert "if" not in workflow["jobs"]["backend"]
     assert "if" not in workflow["jobs"]["frontend"]
+    # The two things a PR has to exercise: the amd64 build and the image checks.
+    build = next(step for step in image["steps"] if step.get("name") == "Build (linux/amd64)")
+    assert build["with"]["platforms"] == "linux/amd64"
+    assert "scripts/test-image.sh" in _run_lines(image)
+
+
+def test_publishing_steps_only_run_on_push(workflow: dict[Any, Any]) -> None:
+    """A pull request builds; only a push to main or a tag could ever publish."""
+    for step in workflow["jobs"]["image"]["steps"]:
+        if step.get("uses", "").startswith("docker/login-action") or step.get("id") == "meta":
+            assert "github.event_name == 'push'" in step["if"], step.get("name")
+
+
+def test_image_name_comes_from_the_repo_variable(workflow: dict[Any, Any]) -> None:
+    """One name for the Docker Hub repo across the workflow and scripts/publish.sh."""
+    raw = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "docker.yml").read_text()
+    metadata = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("uses", "").startswith("docker/metadata-action")
+    ]
+
+    assert len(metadata) == 2
+    for step in metadata:
+        assert step["with"]["images"] == "docker.io/${{ vars.DOCKERHUB_REPO }}"
+    assert "DOCKERHUB_IMAGE" not in raw
 
 
 # First major of each action that runs on Node 24 (Node 20 actions are deprecated on runners).
