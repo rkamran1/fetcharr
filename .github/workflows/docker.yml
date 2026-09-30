@@ -1,19 +1,15 @@
 name: docker
 
+# CI tests and builds; it never publishes. The image is published from the owner's Mac with
+# scripts/publish.sh (D1), so there is nothing here for a release tag or a weekly cron to do:
+# both triggers, the Docker Hub login/metadata/push steps and the weekly rebuild job were
+# removed. Moving publishing back into CI means restoring them together.
 # PRs are tested once per update; main runs again after a merge.
-# CI builds the image and runs the image checks, but never publishes: the owner publishes from
-# their Mac with scripts/publish.sh (D1). The login/metadata/push steps and the weekly rebuild
-# below stay gated by the repository variable DOCKERHUB_PUSH_ENABLED, which is not set, so
-# publishing can be moved into CI later by setting it to 'true'.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
-    tags: ['v*.*.*']
-  # The weekly rebuild (§13.3), so fresh yt-dlp and base-image fixes reach :latest on their own.
-  schedule:
-    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -79,89 +75,3 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Image checks (tools, smoke, PUID/PGID, backups, no local files)
         run: scripts/test-image.sh fetcharr:dev
-      # Everything below is inert: DOCKERHUB_PUSH_ENABLED is not set, and scripts/publish.sh
-      # publishes from the owner's Mac instead. Kept so CI can take over by setting it to 'true'.
-      - name: Docker Hub login
-        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && github.event_name == 'push'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Image metadata
-        id: meta
-        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && github.event_name == 'push'
-        uses: docker/metadata-action@v6
-        with:
-          images: docker.io/${{ vars.DOCKERHUB_REPO }}
-          tags: |
-            type=edge,branch=main
-            type=sha
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-      - name: Push to Docker Hub
-        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && github.event_name == 'push'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.meta.outputs.version }}
-            VCS_REF=${{ github.sha }}
-          cache-from: type=gha
-
-  weekly:
-    # §13.3: rebuild the latest release tag as :latest, so a running server picks up a newer
-    # yt-dlp and base-image security fixes without a new release. Inert while publishing is off:
-    # until then a rebuild means running scripts/publish.sh again from the release tag.
-    runs-on: ubuntu-24.04
-    needs: [backend, frontend]
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Resolve the latest release tag
-        id: release
-        run: |
-          tag="$(git tag --list 'v*.*.*' --sort=-v:refname | head -n 1)"
-          if [ -z "$tag" ]; then
-            echo "::notice::no v*.*.* tag yet, nothing to rebuild"
-          else
-            git checkout --detach "$tag"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v4
-        if: steps.release.outputs.tag != ''
-      - name: Docker Hub login
-        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && steps.release.outputs.tag != ''
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Image metadata
-        id: meta
-        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && steps.release.outputs.tag != ''
-        uses: docker/metadata-action@v6
-        with:
-          images: docker.io/${{ vars.DOCKERHUB_REPO }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.release.outputs.version }}
-      - name: Rebuild and push the latest release
-        if: vars.DOCKERHUB_PUSH_ENABLED == 'true' && steps.release.outputs.tag != ''
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.release.outputs.version }}
-            VCS_REF=${{ github.sha }}
-          cache-from: type=gha

@@ -10,7 +10,7 @@ Guidance for Claude Code when working in this repository.
 - `frontend/`: React + Vite + TypeScript + Tailwind + shadcn/ui + TanStack Query, `npm`.
 - `Dockerfile`, `docker/entrypoint.sh`, `scripts/test-image.sh`: the single `linux/amd64` image and its checks.
 - `scripts/publish.sh`: the only publisher. Builds `linux/amd64` on the owner's Mac and pushes the §13.3 tags to the private Docker Hub repo named by `DOCKERHUB_REPO` (D1).
-- `.github/workflows/docker.yml`: CI (backend, frontend, image). It builds and checks the image on every PR but **never publishes**: the login/metadata/push steps and the `weekly` rebuild stay gated by the repo variable `DOCKERHUB_PUSH_ENABLED`, which is not set. Setting it to `true` is what would move publishing into CI.
+- `.github/workflows/docker.yml`: CI (backend, frontend, image). Three jobs, no publishing: it tests and builds the `linux/amd64` image and runs `scripts/test-image.sh` on every PR and every push to `main`. It holds no Docker Hub credentials, and `backend/tests/repo/test_ci_workflow.py::test_ci_never_publishes` keeps it that way. Triggers are `pull_request`/`push` on `main` plus `workflow_dispatch`; a release tag and a weekly cron would only re-check what a PR already checked, so neither is wired up. Moving publishing into CI means restoring the tag trigger, the login/metadata/push steps and the weekly rebuild together.
 
 ## Where the rest lives (local only, git-ignored)
 

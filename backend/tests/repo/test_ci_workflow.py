@@ -4,8 +4,6 @@ from typing import Any
 import pytest
 import yaml
 
-GATE = "vars.DOCKERHUB_PUSH_ENABLED == 'true'"
-
 
 @pytest.fixture
 def workflow(repo_root: Path) -> dict[Any, Any]:
@@ -21,39 +19,16 @@ def _run_lines(job: dict[str, Any]) -> str:
     return "\n".join(step.get("run", "") for step in job["steps"])
 
 
-def test_triggers_include_release_tags_a_weekly_schedule_and_dispatch(
-    workflow: dict[Any, Any],
-) -> None:
+def test_triggers_are_pull_request_main_and_dispatch(workflow: dict[Any, Any]) -> None:
+    """CI never publishes, so a release tag and a weekly cron would only burn minutes."""
     triggers = _triggers(workflow)
 
-    assert set(triggers) == {"pull_request", "push", "schedule", "workflow_dispatch"}
+    assert set(triggers) == {"pull_request", "push", "workflow_dispatch"}
     assert triggers["pull_request"]["branches"] == ["main"]
     # Feature-branch pushes are covered by their PR; only main runs on push.
     assert triggers["push"]["branches"] == ["main"]
-    # A release tag publishes the semver tags; the weekly run rebuilds the newest of them.
-    assert triggers["push"]["tags"] == ["v*.*.*"]
-    assert [entry["cron"] for entry in triggers["schedule"]]
-
-
-def test_weekly_job_rebuilds_the_latest_release_tag(workflow: dict[Any, Any]) -> None:
-    weekly = workflow["jobs"]["weekly"]
-
-    assert "schedule" in weekly["if"]
-    assert weekly["needs"] == ["backend", "frontend"]
-    resolve = next(step for step in weekly["steps"] if step.get("id") == "release")
-    assert "git tag --list 'v*.*.*'" in resolve["run"]
-    assert "git checkout --detach" in resolve["run"]
-
-
-def test_weekly_job_publishes_latest(workflow: dict[Any, Any]) -> None:
-    weekly = workflow["jobs"]["weekly"]
-    meta = next(step for step in weekly["steps"] if step.get("id") == "meta")
-    push = next(step for step in weekly["steps"] if step.get("with", {}).get("push") is True)
-
-    assert "type=raw,value=latest" in meta["with"]["tags"]
-    assert GATE in push["if"]
-    # Nothing is built when there is no release tag to rebuild.
-    assert "steps.release.outputs.tag != ''" in push["if"]
+    # A tag push would re-check a commit its PR already checked, and publish nothing.
+    assert "tags" not in triggers["push"]
 
 
 def test_defines_backend_frontend_image_jobs(workflow: dict[Any, Any]) -> None:
@@ -71,22 +46,24 @@ def test_defines_backend_frontend_image_jobs(workflow: dict[Any, Any]) -> None:
     assert "scripts/test-image.sh" in _run_lines(image)
 
 
-def test_dockerhub_steps_gated_by_repo_variable(workflow: dict[Any, Any]) -> None:
+def test_ci_never_publishes(workflow: dict[Any, Any]) -> None:
+    """scripts/publish.sh is the only publisher, so nothing here logs in, reads image metadata,
+    pushes, or so much as mentions a Docker Hub credential."""
+    raw = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "docker.yml").read_text()
     steps = [step for job in workflow["jobs"].values() for step in job["steps"]]
-    publishing = [
-        step
-        for step in steps
-        if step.get("uses", "").startswith("docker/login-action")
-        or step.get("with", {}).get("push") is True
-    ]
 
-    assert len(publishing) >= 2
-    assert all(GATE in step.get("if", "") for step in publishing)
+    for step in steps:
+        uses = step.get("uses", "")
+        assert not uses.startswith(("docker/login-action", "docker/metadata-action")), uses
+        assert step.get("with", {}).get("push") is not True, step.get("name")
+    # No gated-off remnants either: a disabled push step is still a credential reference.
+    assert "DOCKERHUB" not in raw
+    assert "secrets." not in raw
 
 
 def test_image_job_builds_and_checks_on_pull_requests(workflow: dict[Any, Any]) -> None:
-    """CI never publishes (D1: the owner publishes from their Mac), but it must still catch a
-    broken Dockerfile before a hand-rolled publish, so the job runs unconditionally."""
+    """CI cannot publish a broken image, but it must still catch a broken Dockerfile before a
+    hand-rolled publish does, so the job runs unconditionally."""
     image = workflow["jobs"]["image"]
 
     assert "if" not in image
@@ -98,27 +75,9 @@ def test_image_job_builds_and_checks_on_pull_requests(workflow: dict[Any, Any]) 
     assert "scripts/test-image.sh" in _run_lines(image)
 
 
-def test_publishing_steps_only_run_on_push(workflow: dict[Any, Any]) -> None:
-    """A pull request builds; only a push to main or a tag could ever publish."""
-    for step in workflow["jobs"]["image"]["steps"]:
-        if step.get("uses", "").startswith("docker/login-action") or step.get("id") == "meta":
-            assert "github.event_name == 'push'" in step["if"], step.get("name")
-
-
-def test_image_name_comes_from_the_repo_variable(workflow: dict[Any, Any]) -> None:
-    """One name for the Docker Hub repo across the workflow and scripts/publish.sh."""
-    raw = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "docker.yml").read_text()
-    metadata = [
-        step
-        for job in workflow["jobs"].values()
-        for step in job["steps"]
-        if step.get("uses", "").startswith("docker/metadata-action")
-    ]
-
-    assert len(metadata) == 2
-    for step in metadata:
-        assert step["with"]["images"] == "docker.io/${{ vars.DOCKERHUB_REPO }}"
-    assert "DOCKERHUB_IMAGE" not in raw
+def test_only_the_three_test_and_build_jobs_remain(workflow: dict[Any, Any]) -> None:
+    """The weekly rebuild job went with the publishing it existed to do."""
+    assert set(workflow["jobs"]) == {"backend", "frontend", "image"}
 
 
 # First major of each action that runs on Node 24 (Node 20 actions are deprecated on runners).
@@ -128,8 +87,6 @@ NODE24_MIN_MAJOR = {
     "astral-sh/setup-uv": 7,
     "docker/setup-buildx-action": 4,
     "docker/build-push-action": 7,
-    "docker/login-action": 4,
-    "docker/metadata-action": 6,
 }
 
 
