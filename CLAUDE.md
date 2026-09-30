@@ -9,7 +9,8 @@ Guidance for Claude Code when working in this repository.
 - `backend/`: Python 3.13, FastAPI, SQLAlchemy 2 async + aiosqlite, Alembic, pydantic-settings, `uv`.
 - `frontend/`: React + Vite + TypeScript + Tailwind + shadcn/ui + TanStack Query, `npm`.
 - `Dockerfile`, `docker/entrypoint.sh`, `scripts/test-image.sh`: the single `linux/amd64` image and its checks.
-- `.github/workflows/docker.yml`: CI (backend, frontend, image). Docker Hub push is gated by the repo variable `DOCKERHUB_PUSH_ENABLED`.
+- `scripts/publish.sh`: the only publisher. Builds `linux/amd64` on the owner's Mac and pushes the §13.3 tags to the private Docker Hub repo named by `DOCKERHUB_REPO` (D1).
+- `.github/workflows/docker.yml`: CI (backend, frontend, image). It builds and checks the image on every PR but **never publishes**: the login/metadata/push steps and the `weekly` rebuild stay gated by the repo variable `DOCKERHUB_PUSH_ENABLED`, which is not set. Setting it to `true` is what would move publishing into CI.
 
 ## Where the rest lives (local only, git-ignored)
 

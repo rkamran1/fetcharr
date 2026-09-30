@@ -12,6 +12,8 @@ Add the service from [`docker-compose.example.yml`](docker-compose.example.yml) 
 docker compose pull fetcharr && docker compose up -d fetcharr
 ```
 
+[Deploy](#deploy) has the full first-time setup: publishing the image, the one-time `docker login`, and how to update and roll back.
+
 On start the container upgrades yt-dlp (unless `YTDLP_UPDATE_ON_START=false`), backs up an existing database to `/config/backups/` (keeping the newest 5), applies migrations, and serves the UI on port 8000 inside the container. Every night at 03:00 it cleans stale folders out of `incomplete/` and writes a dated backup to `/config/backups/`, keeping the newest 7.
 
 On the first visit, fetcharr asks you to create its one account. Settings has "Change password" and an API key (sent as the `X-Api-Key` header).
@@ -51,6 +53,71 @@ Mount two volumes: `/config` (database and backups, on a local disk) and `/web-d
 | `SONARR_URL` | unset | app | Sonarr's base URL, e.g. `http://sonarr:8989`. Set here it overrides what Settings holds. |
 | `SONARR_API_KEY` | unset | app | Sonarr's API key. Set here it overrides what Settings holds and is never written to the database. |
 | `APP_VERSION` | `dev` | app | version shown in the UI and `/healthz`. Set by the image build (`--build-arg APP_VERSION=…`). |
+
+## Deploy
+
+The image lives in a **private** Docker Hub repo. You build and push it from your Mac; the server only pulls. CI builds the image and runs the image checks on every pull request, but never publishes.
+
+### One time
+
+1. On [hub.docker.com](https://hub.docker.com), create the private repo `<user>/fetcharr` and two access tokens: **Read & Write** for your Mac, **Read-only** for the server.
+2. On your Mac: `docker login -u <user>` with the Read & Write token, and `export DOCKERHUB_REPO=<user>/fetcharr`.
+3. On the server: `docker login -u <user>` with the Read-only token. That is all `docker compose pull` needs.
+
+### Publish
+
+From a clean tree (the script refuses a dirty one), with `DOCKERHUB_REPO` set:
+
+```bash
+scripts/publish.sh edge            # -> :edge and :sha-<short>, from any commit on main
+git tag v0.1.0 && scripts/publish.sh v0.1.0   # -> :0.1.0, :0.1, :0 and :latest
+```
+
+A release ref only publishes from the commit that carries that git tag. `--dry-run` prints the tags and the build command without pushing. The build is always `--platform linux/amd64`: a plain `docker build` on Apple Silicon makes an arm64 image the Intel server cannot run.
+
+Nothing rebuilds `:latest` on a schedule, so base-image and ffmpeg security fixes only reach the server when you publish again. yt-dlp itself updates at every container start unless you set `YTDLP_UPDATE_ON_START=false`.
+
+### Add it to the arr stack
+
+Copy the `fetcharr` service out of [`docker-compose.example.yml`](docker-compose.example.yml) into the `docker-compose.yml` that already runs Sonarr and Radarr, then:
+
+- set `DOCKERHUB_REPO=<user>/fetcharr` in that stack's `.env` (or write the image name in full);
+- point `/config` at a folder on a local disk, and `/web-downloads` at your downloads folder;
+- **mount that same host downloads folder at `/web-downloads` in Radarr and Sonarr too** — fetcharr hands them paths under `/web-downloads`, so those paths must exist in their containers;
+- set `PUID`, `PGID` and `UMASK` to the same values your Sonarr and Radarr services use, or the arr apps cannot move what fetcharr wrote;
+- keep `/dev/dri` and `group_add` for hardware transcoding (`RENDER_GID` from `getent group render | cut -d: -f3`). Without them transcodes fall back to software x265 and downloads are unaffected;
+- set `RADARR_URL=http://radarr:7878` and `SONARR_URL=http://sonarr:8989` — service names work because it is the same compose project — or leave them out and fill them in Settings.
+
+Then bring it up, open `http://<server>:8686` and create the account:
+
+```bash
+docker compose pull fetcharr && docker compose up -d fetcharr
+```
+
+Check the version in the UI footer, and Settings → System for the path self-test: it should report `incomplete/` and `completed/` on the one `/web-downloads` volume.
+
+### Update
+
+```bash
+scripts/publish.sh v0.2.0                      # on your Mac
+docker compose pull fetcharr && docker compose up -d fetcharr   # on the server
+```
+
+Migrations run on start, after a database backup to `/config/backups/`. The footer version is how you confirm the new image is the one running.
+
+### Roll back
+
+Pin the previous tag in the compose file and bring it up again:
+
+```yaml
+    image: docker.io/${DOCKERHUB_REPO}:0.1.0
+```
+
+```bash
+docker compose up -d fetcharr
+```
+
+The footer version should change back. Pinning `:1` or `:1.4` instead of `:latest` avoids surprise updates when you pull the whole stack.
 
 ## Development
 

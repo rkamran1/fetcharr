@@ -1,8 +1,10 @@
 # Paste this service into the docker-compose.yml that already runs Sonarr/Radarr.
 # Being in the same compose project puts it on the same network as Radarr/Sonarr.
+# Set DOCKERHUB_REPO=<your-dockerhub-user>/fetcharr in the stack's .env (or write the name in
+# full below). See the README's "Deploy" section.
 services:
   fetcharr:
-    image: docker.io/<your-dockerhub-user>/fetcharr:latest   # or pin :1.4 for controlled updates
+    image: docker.io/${DOCKERHUB_REPO}:latest   # or pin :1 (or :1.4) for controlled updates
     container_name: fetcharr
     environment:
       - PUID=1000                 # same values as your sonarr/radarr services (default 1000)
